@@ -43,7 +43,7 @@ export function DataDashboard({ dataFiles, onFileClick, onUploadClick, onDeleteC
       <nav className="h-16 border-b border-[#E4E7ED] px-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-[#1890FF] rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-sm">SHb</span>
+            <span className="text-white font-bold text-sm">SH</span>
           </div>
           <h1 className="text-xl font-semibold text-[#2C3E50]">时序数据标注平台</h1>
         </div>

@@ -1,4 +1,4 @@
-import { Move, ZoomIn, Target, Edit3 } from 'lucide-react';
+import { Move, ZoomIn, Target, Edit3, Globe } from 'lucide-react';
 import { useState } from 'react';
 
 export type ToolMode = 'pan' | 'zoom' | 'annotate' | null;
@@ -8,6 +8,7 @@ interface ChartToolbarProps {
   onModeChange: (mode: ToolMode) => void;
   onAutoAxis: () => void;
   onZoomOut: () => void;
+  onOpenInBrowser?: () => void;
 }
 
 export function ChartToolbar({
@@ -15,6 +16,7 @@ export function ChartToolbar({
   onModeChange,
   onAutoAxis,
   onZoomOut,
+  onOpenInBrowser,
 }: ChartToolbarProps) {
   const tools = [
     { mode: 'pan' as ToolMode, icon: Move, label: '移动', description: '左键拖动平移' },
@@ -64,6 +66,14 @@ export function ChartToolbar({
         >
           <Target className="w-4 h-4 inline mr-1" />
           查看全貌
+        </button>
+        {/* Open in browser icon */}
+        <button
+          className="p-2 rounded hover:bg-white transition-colors"
+          onClick={() => onOpenInBrowser?.()}
+          title="在新窗口打开"
+        >
+          <Globe className="w-4 h-4 text-[#2C3E50]" />
         </button>
       </div>
     </div>
