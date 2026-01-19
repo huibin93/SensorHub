@@ -1,0 +1,4 @@
+
+# Ignore Reference folder
+Reference/
+node_modules
