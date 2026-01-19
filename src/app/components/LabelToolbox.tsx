@@ -1,30 +1,17 @@
-import { LabelType } from '@/app/types';
-import { useEffect, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { LabelType, AnnotationRegion } from '@/app/types';
+import { Plus, Trash2, CheckSquare, Square, MinusSquare } from 'lucide-react';
 import { Button } from '@/app/components/ui/button';
 
 interface LabelToolboxProps {
   labelTypes: LabelType[];
-  selectedLabel: LabelType | null;
-  onSelectLabel: (label: LabelType | null) => void;
+  selectedLabels: LabelType[];
+  annotations: AnnotationRegion[];
+  onSelectLabels: (labels: LabelType[]) => void;
   onAddLabel?: (label: LabelType) => void;
   onDeleteLabel?: (labelId: string) => void;
 }
 
-export function LabelToolbox({ labelTypes, selectedLabel, onSelectLabel, onAddLabel, onDeleteLabel }: LabelToolboxProps) {
-  useEffect(() => {
-    const handleKeyPress = (e: KeyboardEvent) => {
-      const label = labelTypes.find((l) => l.shortcut === e.key);
-      if (label) {
-        // Toggle selection
-        onSelectLabel(selectedLabel?.id === label.id ? null : label);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [labelTypes, onSelectLabel, selectedLabel]);
-
+export function LabelToolbox({ labelTypes, selectedLabels, annotations, onSelectLabels, onAddLabel, onDeleteLabel }: LabelToolboxProps) {
   const handleAddLabel = () => {
     const colors = ['#FA541C', '#13C2C2', '#2F54EB', '#EB2F96', '#52C41A'];
     const newLabel: LabelType = {
@@ -36,43 +23,83 @@ export function LabelToolbox({ labelTypes, selectedLabel, onSelectLabel, onAddLa
     onAddLabel?.(newLabel);
   };
 
+  // 统计每个标签的使用次数
+  const getLabelCount = (labelName: string) => {
+    return annotations.filter(a => a.label === labelName).length;
+  };
+
+  // 计算三态状态
+  const allSelected = selectedLabels.length === labelTypes.length && labelTypes.length > 0;
+  const someSelected = selectedLabels.length > 0 && selectedLabels.length < labelTypes.length;
+  const noneSelected = selectedLabels.length === 0;
+
+  // 三态选框点击逻辑：未选中/半选中 -> 全选，全选 -> 清空
+  const handleToggleSelection = () => {
+    if (allSelected) {
+      onSelectLabels([]);
+    } else {
+      onSelectLabels([...labelTypes]);
+    }
+  };
+
+  // 单个标签点击切换
+  const handleLabelClick = (label: LabelType) => {
+    const isSelected = selectedLabels.some(l => l.id === label.id);
+    if (isSelected) {
+      onSelectLabels(selectedLabels.filter(l => l.id !== label.id));
+    } else {
+      onSelectLabels([...selectedLabels, label]);
+    }
+  };
+
   return (
-    <div className="flex flex-col">
-      <div className="flex items-center justify-between mb-3">
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between mb-3 flex-shrink-0">
         <h3 className="text-sm font-semibold text-[#2C3E50]">标签类型</h3>
-        {onAddLabel && (
+        <div className="flex gap-1">
           <Button 
             variant="ghost" 
             size="sm" 
-            className="h-6 px-2"
-            onClick={handleAddLabel}
+            className="h-6 w-6 p-0"
+            onClick={handleToggleSelection}
+            title={allSelected ? "清空" : "全选"}
           >
-            <Plus className="w-3 h-3 mr-1" />
-            添加
+            {allSelected ? (
+              <CheckSquare className="w-3.5 h-3.5" />
+            ) : someSelected ? (
+              <MinusSquare className="w-3.5 h-3.5" />
+            ) : (
+              <Square className="w-3.5 h-3.5" />
+            )}
           </Button>
-        )}
+          {onAddLabel && (
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-6 w-6 p-0"
+              onClick={handleAddLabel}
+              title="添加标签"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Click outside to deselect */}
       <div 
-        className="space-y-2 p-2 bg-white rounded-lg border border-[#E4E7ED] max-h-[300px] overflow-y-auto"
-        onClick={(e) => {
-          if (e.target === e.currentTarget) {
-            onSelectLabel(null);
-          }
-        }}
+        className="flex-1 space-y-2 p-2 bg-white rounded-lg border border-[#E4E7ED] overflow-y-auto"
       >
         {/* Table Header */}
         <div className="grid grid-cols-12 gap-2 pb-2 border-b border-[#E4E7ED] text-xs font-medium text-[#909399]">
           <div className="col-span-1"></div>
           <div className="col-span-7">名称</div>
-          <div className="col-span-2 text-center">快捷键</div>
+          <div className="col-span-2 text-center">区域数</div>
           <div className="col-span-2"></div>
         </div>
 
         {/* Label Rows */}
         {labelTypes.map((label) => {
-          const isSelected = selectedLabel?.id === label.id;
+          const isSelected = selectedLabels.some(l => l.id === label.id);
           return (
             <div
               key={label.id}
@@ -84,7 +111,7 @@ export function LabelToolbox({ labelTypes, selectedLabel, onSelectLabel, onAddLa
                   : 'hover:bg-[#FAFAFA]'
                 }
               `}
-              onClick={() => onSelectLabel(isSelected ? null : label)}
+              onClick={() => handleLabelClick(label)}
             >
               {/* Color indicator */}
               <div className="col-span-1">
@@ -104,13 +131,11 @@ export function LabelToolbox({ labelTypes, selectedLabel, onSelectLabel, onAddLa
                 </span>
               </div>
 
-              {/* Shortcut */}
+              {/* Count */}
               <div className="col-span-2 text-center">
-                {label.shortcut && (
-                  <span className="inline-block px-2 py-0.5 bg-[#F5F7FA] text-xs font-mono rounded">
-                    {label.shortcut}
-                  </span>
-                )}
+                <span className="inline-block px-2 py-0.5 bg-[#F5F7FA] text-xs rounded font-medium text-[#606266]">
+                  {getLabelCount(label.name)}
+                </span>
               </div>
 
               {/* Delete */}
@@ -138,9 +163,6 @@ export function LabelToolbox({ labelTypes, selectedLabel, onSelectLabel, onAddLa
         )}
       </div>
 
-      <div className="mt-2 text-xs text-[#909399] text-center">
-        提示：按数字键快速切换标签，点击空白处取消选择
-      </div>
     </div>
   );
 }

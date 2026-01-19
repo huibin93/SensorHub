@@ -19,7 +19,7 @@ interface AnnotatorDrawerProps {
 
 export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelTypes }: AnnotatorDrawerProps) {
   const [activeChannels, setActiveChannels] = useState({ acc: true, gyro: true });
-  const [selectedLabel, setSelectedLabel] = useState<LabelType | null>(null);
+  const [selectedLabels, setSelectedLabels] = useState<LabelType[]>(initialLabelTypes);
   const [annotations, setAnnotations] = useState<AnnotationRegion[]>([]);
   const [viewport, setViewport] = useState({ start: 0, end: 30 });
   const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
@@ -50,8 +50,8 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
   };
 
   const handleCreateAnnotation = (startTime: number, endTime: number) => {
-    // If no label selected, use first label
-    const labelToUse = selectedLabel || labelTypes[0];
+    // Use first selected label
+    const labelToUse = selectedLabels[0] || labelTypes[0];
     if (!labelToUse) {
       toast.error('请先选择标签类型');
       return;
@@ -153,9 +153,7 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
   const handleDeleteLabel = (labelId: string) => {
     if (confirm('确定要删除此标签吗？')) {
       setLabelTypes(prev => prev.filter(l => l.id !== labelId));
-      if (selectedLabel?.id === labelId) {
-        setSelectedLabel(null);
-      }
+      setSelectedLabels(prev => prev.filter(l => l.id !== labelId));
       // Remove annotations with this label
       const labelToDelete = labelTypes.find(l => l.id === labelId);
       if (labelToDelete) {
@@ -165,10 +163,10 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
     }
   };
 
-  // Filter annotations based on selected label
-  const filteredAnnotations = selectedLabel 
-    ? annotations.filter(a => a.label === selectedLabel.name)
-    : annotations;
+  // Filter annotations based on selected labels
+  const filteredAnnotations = selectedLabels.length === 0 
+    ? annotations
+    : annotations.filter(a => selectedLabels.some(l => l.name === a.label));
 
   return (
     <div className="fixed inset-0 z-50 flex">
@@ -264,21 +262,20 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
               <ChartToolbar
                 activeMode={toolMode}
                 onModeChange={setToolMode}
-                onAutoFit={handleAutoFitY}
                 onAutoAxis={handleAutoAxis}
                 onZoomOut={handleZoomOut}
               />
             </div>
 
             {/* Charts */}
-            <div className="flex-1 space-y-4 overflow-auto">
+            <div className="flex-1 overflow-auto">
               {activeChannels.acc && (
                 <TimeSeriesChart
                   data={fileDetail.data}
                   viewport={viewport}
                   channel="acc"
                   annotations={filteredAnnotations}
-                  selectedLabel={selectedLabel}
+                  selectedLabels={selectedLabels}
                   onCreateAnnotation={handleCreateAnnotation}
                   hoveredRegionId={hoveredRegionId}
                   toolMode={toolMode}
@@ -292,7 +289,7 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
                   viewport={viewport}
                   channel="gyro"
                   annotations={filteredAnnotations}
-                  selectedLabel={selectedLabel}
+                  selectedLabels={selectedLabels}
                   onCreateAnnotation={handleCreateAnnotation}
                   hoveredRegionId={hoveredRegionId}
                   toolMode={toolMode}
@@ -309,27 +306,36 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
                 totalDuration={fileDetail.totalDuration}
                 viewport={viewport}
                 onViewportChange={setViewport}
+                annotations={annotations}
               />
             </div>
           </div>
 
           {/* Sidebar (25%) */}
-          <div className="bg-[#FAFAFA] border-l border-[#E4E7ED] p-6 overflow-auto flex flex-col gap-6" style={{ width: '25%' }}>
-            <RegionList
-              annotations={filteredAnnotations}
-              onDelete={handleDeleteAnnotation}
-              onRegionClick={handleRegionClick}
-              onHoverChange={setHoveredRegionId}
-              onClearAll={handleClearAllAnnotations}
-              onRegionEdit={handleRegionEdit}
-            />
-            <LabelToolbox
-              labelTypes={labelTypes}
-              selectedLabel={selectedLabel}
-              onSelectLabel={setSelectedLabel}
-              onAddLabel={handleAddLabel}
-              onDeleteLabel={handleDeleteLabel}
-            />
+          <div className="bg-[#FAFAFA] border-l border-[#E4E7ED] p-6 overflow-hidden flex flex-col gap-6" style={{ width: '25%' }}>
+            {/* 已标注区域 - 固定 50% 高度 */}
+            <div style={{ height: '50%', display: 'flex', flexDirection: 'column' }}>
+              <RegionList
+                annotations={filteredAnnotations}
+                onDelete={handleDeleteAnnotation}
+                onRegionClick={handleRegionClick}
+                onHoverChange={setHoveredRegionId}
+                onClearAll={handleClearAllAnnotations}
+                onRegionEdit={handleRegionEdit}
+              />
+            </div>
+            
+            {/* 标签工具箱 - 固定 50% 高度 */}
+            <div style={{ height: '50%', display: 'flex', flexDirection: 'column' }}>
+              <LabelToolbox
+                labelTypes={labelTypes}
+                selectedLabels={selectedLabels}
+                annotations={annotations}
+                onSelectLabels={setSelectedLabels}
+                onAddLabel={handleAddLabel}
+                onDeleteLabel={handleDeleteLabel}
+              />
+            </div>
           </div>
         </div>
       </motion.div>

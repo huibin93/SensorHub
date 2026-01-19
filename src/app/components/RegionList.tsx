@@ -24,16 +24,16 @@ export function RegionList({
   };
 
   return (
-    <div className="flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-[#2C3E50]">
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between mb-3 flex-shrink-0">
+        <h3 className="text-sm font-semibold text-[#424242]">
           已标注区域 ({annotations.length})
         </h3>
         {annotations.length > 0 && (
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 px-2 text-[#F5222D] hover:text-[#F5222D] hover:bg-[#FEF0F0]"
+            className="h-6 px-2 text-[#D32F2F] hover:text-[#D32F2F] hover:bg-[#FFEBEE]"
             onClick={onClearAll}
           >
             <Trash2 className="w-3 h-3 mr-1" />
@@ -41,9 +41,9 @@ export function RegionList({
           </Button>
         )}
       </div>
-      <div className="space-y-2 overflow-y-auto max-h-[400px]">
+      <div className="flex-1 space-y-2 overflow-y-auto">
         {annotations.length === 0 ? (
-          <div className="text-center py-8 text-sm text-[#909399]">
+          <div className="text-center py-8 text-sm text-[#9E9E9E]">
             暂无标注
           </div>
         ) : (

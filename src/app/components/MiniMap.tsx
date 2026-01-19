@@ -1,23 +1,93 @@
-import { useRef, useState, useEffect } from 'react';
-import { LineChart, Line, ResponsiveContainer } from 'recharts';
-import { TimeSeriesDataPoint } from '@/app/types';
+import { useRef, useState, useEffect, useMemo } from 'react';
+import uPlot from 'uplot';
+import 'uplot/dist/uPlot.min.css';
+import { TimeSeriesDataPoint, AnnotationRegion } from '@/app/types';
+import { useUplot } from '../hooks/useUplot';
 
 interface MiniMapProps {
   data: TimeSeriesDataPoint[];
   totalDuration: number;
   viewport: { start: number; end: number };
   onViewportChange: (viewport: { start: number; end: number }) => void;
+  annotations?: AnnotationRegion[];  // 新增：标注区域
 }
 
-export function MiniMap({ data, totalDuration, viewport, onViewportChange }: MiniMapProps) {
+export function MiniMap({ data, totalDuration, viewport, onViewportChange, annotations = [] }: MiniMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState<'left' | 'right' | null>(null);
   const [dragStartX, setDragStartX] = useState(0);
   const [initialViewport, setInitialViewport] = useState(viewport);
+  const [dimensions, setDimensions] = useState({ width: 800, height: 100 });
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionStart, setSelectionStart] = useState<number | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
+
+  // Handle resize
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setDimensions({ width, height });
+      }
+    });
+
+    resizeObserver.observe(containerRef.current);
+    return () => resizeObserver.disconnect();
+  }, []);
 
   // Downsample data for minimap
-  const downsampledData = data.filter((_, i) => i % 10 === 0);
+  const downsampledData = useMemo(() => {
+    return data.filter((_, i) => i % 10 === 0);
+  }, [data]);
+
+  // Prepare data for uPlot
+  const uplotData = useMemo((): uPlot.AlignedData => {
+    const times = downsampledData.map((d) => d.time);
+    const accX = downsampledData.map((d) => d.accX);
+    return [times, accX];
+  }, [downsampledData]);
+
+  // uPlot options
+  const uplotOptions = useMemo((): uPlot.Options => {
+    return {
+      width: dimensions.width,
+      height: dimensions.height - 12,  // 为X轴标签预留较少空间，增加图表高度
+      scales: {
+        x: {
+          time: false,
+          range: [0, totalDuration],
+        },
+      },
+      axes: [
+        {
+          show: true,
+          stroke: '#BDBDBD',
+          grid: { show: false },
+          ticks: { stroke: '#BDBDBD', size: 4 },
+          font: '10px sans-serif',
+          labelSize: 16,
+          gap: 2,
+          values: (u, vals) => vals.map(v => `${v.toFixed(1)}s`),
+        },
+        { show: false },
+      ],
+      series: [
+        {},
+        {
+          stroke: '#757575',
+          width: 1,
+          points: { show: false },
+        },
+      ],
+      cursor: { show: false },
+      legend: { show: false },
+    };
+  }, [dimensions, totalDuration]);
+
+  const { containerRef: uplotContainerRef } = useUplot(uplotData, uplotOptions, [totalDuration]);
 
   const getTimeFromPosition = (clientX: number): number => {
     if (!containerRef.current) return 0;
@@ -38,8 +108,28 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange }: Min
     }
   };
 
+  // 添加左键框选功能
+  const handleContainerMouseDown = (e: React.MouseEvent) => {
+    // 如果点击的是容器本身（不是选框）
+    if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('minimap-background')) {
+      e.preventDefault();
+      const startTime = getTimeFromPosition(e.clientX);
+      setIsSelecting(true);
+      setSelectionStart(startTime);
+      setSelectionEnd(startTime);
+      setDragStartX(e.clientX);
+    }
+  };
+
   const handleMouseMove = (e: MouseEvent) => {
     if (!containerRef.current) return;
+
+    // 处理框选
+    if (isSelecting && selectionStart !== null) {
+      const currentTime = getTimeFromPosition(e.clientX);
+      setSelectionEnd(currentTime);
+      return;
+    }
 
     const rect = containerRef.current.getBoundingClientRect();
     const deltaX = e.clientX - dragStartX;
@@ -71,6 +161,18 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange }: Min
   };
 
   const handleMouseUp = () => {
+    // 完成框选
+    if (isSelecting && selectionStart !== null && selectionEnd !== null) {
+      const newStart = Math.min(selectionStart, selectionEnd);
+      const newEnd = Math.max(selectionStart, selectionEnd);
+      // 只有当框选区域足够大时才跳转（至少0.1秒）
+      if (Math.abs(newEnd - newStart) > 0.1) {
+        onViewportChange({ start: newStart, end: newEnd });
+      }
+      setIsSelecting(false);
+      setSelectionStart(null);
+      setSelectionEnd(null);
+    }
     setIsDragging(false);
     setIsResizing(null);
   };
@@ -92,21 +194,32 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange }: Min
   return (
     <div
       ref={containerRef}
-      className="relative h-full bg-white rounded-lg border border-[#E4E7ED] overflow-hidden"
+      className="relative h-full bg-white overflow-hidden minimap-background"
+      onMouseDown={handleContainerMouseDown}
     >
       {/* Background chart */}
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={downsampledData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-          <Line
-            type="monotone"
-            dataKey="accX"
-            stroke="#909399"
-            strokeWidth={1}
-            dot={false}
-            isAnimationActive={false}
-          />
-        </LineChart>
-      </ResponsiveContainer>
+      <div ref={uplotContainerRef} className="absolute inset-0 minimap-background" />
+
+      {/* Annotation regions background (工业风格色块) */}
+      <div className="absolute inset-0 pointer-events-none">
+        {annotations.map((annotation) => {
+          const leftPercent = (annotation.startTime / totalDuration) * 100;
+          const widthPercent = ((annotation.endTime - annotation.startTime) / totalDuration) * 100;
+          
+          return (
+            <div
+              key={annotation.id}
+              className="absolute top-0 bottom-0"
+              style={{
+                left: `${leftPercent}%`,
+                width: `${widthPercent}%`,
+                backgroundColor: annotation.color,
+                opacity: 0.25,
+              }}
+            />
+          );
+        })}
+      </div>
 
       {/* Dimmed areas outside viewport */}
       <div className="absolute inset-0 pointer-events-none">
@@ -120,9 +233,22 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange }: Min
         />
       </div>
 
+      {/* Selection box (框选区域) */}
+      {isSelecting && selectionStart !== null && selectionEnd !== null && (
+        <div
+          className="absolute top-0 bottom-0 pointer-events-none"
+          style={{
+            left: `${(Math.min(selectionStart, selectionEnd) / totalDuration) * 100}%`,
+            width: `${(Math.abs(selectionEnd - selectionStart) / totalDuration) * 100}%`,
+            backgroundColor: 'rgba(24, 144, 255, 0.2)',
+            border: '2px dashed #1890FF',
+          }}
+        />
+      )}
+
       {/* Viewport window */}
       <div
-        className="absolute top-0 bottom-0 border-2 border-[#1890FF] bg-transparent"
+        className="absolute top-0 bottom-0 border border-[#1890FF] bg-transparent"
         style={{
           left: `${viewportLeftPercent}%`,
           width: `${viewportWidthPercent}%`,

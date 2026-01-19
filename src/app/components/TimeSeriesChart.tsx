@@ -1,14 +1,18 @@
-import { useState, useRef, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ReferenceArea } from 'recharts';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import uPlot from 'uplot';
+import 'uplot/dist/uPlot.min.css';
 import { TimeSeriesDataPoint, AnnotationRegion, LabelType } from '@/app/types';
 import { ToolMode } from './ChartToolbar';
+import { useUplot } from '../hooks/useUplot';
+import { useRegions } from '../hooks/useRegions';
+import { OverlayCanvas } from './OverlayCanvas';
 
 interface TimeSeriesChartProps {
   data: TimeSeriesDataPoint[];
   viewport: { start: number; end: number };
   channel: 'acc' | 'gyro';
   annotations: AnnotationRegion[];
-  selectedLabel: LabelType | null;
+  selectedLabels: LabelType[];
   onCreateAnnotation: (startTime: number, endTime: number) => void;
   hoveredRegionId: string | null;
   toolMode: ToolMode;
@@ -21,153 +25,125 @@ export function TimeSeriesChart({
   viewport,
   channel,
   annotations,
-  selectedLabel,
+  selectedLabels,
   onCreateAnnotation,
   hoveredRegionId,
   toolMode,
   onViewportChange,
   yAxisDomain,
 }: TimeSeriesChartProps) {
-  const [mousePosition, setMousePosition] = useState<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 800, height: 250 });
+  const [mousePosition, setMousePosition] = useState<{ x: number; time: number } | null>(null);
   const [dragStart, setDragStart] = useState<number | null>(null);
   const [dragEnd, setDragEnd] = useState<number | null>(null);
-  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
-  const [panStartX, setPanStartX] = useState<number | null>(null);
-  const [panStartViewport, setPanStartViewport] = useState(viewport);
-  const chartRef = useRef<HTMLDivElement>(null);
+  const { pixelToTime, timeToPixel } = useRegions();
 
-  // Filter data for viewport
-  const filteredData = data.filter(
-    (d) => d.time >= viewport.start && d.time <= viewport.end
-  );
+  // Handle resize
+  useEffect(() => {
+    if (!containerRef.current) return;
 
-  // Colors for channels
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setDimensions({ width, height: height - 30 });
+      }
+    });
+
+    resizeObserver.observe(containerRef.current);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  // Prepare data for uPlot
+  const uplotData = useMemo((): uPlot.AlignedData => {
+    // Filter data for viewport
+    const filteredData = data.filter(
+      (d) => d.time >= viewport.start && d.time <= viewport.end
+    );
+
+    const times = filteredData.map((d) => d.time);
+    const xData = filteredData.map((d) => (channel === 'acc' ? d.accX : d.gyroX));
+    const yData = filteredData.map((d) => (channel === 'acc' ? d.accY : d.gyroY));
+    const zData = filteredData.map((d) => (channel === 'acc' ? d.accZ : d.gyroZ));
+
+    return [times, xData, yData, zData];
+  }, [data, viewport, channel]);
+
+  // Colors for channels - High saturation colors
   const colors = {
-    acc: {
-      x: '#F5222D',
-      y: '#52C41A',
-      z: '#1890FF',
-    },
-    gyro: {
-      x: '#FA8C16',
-      y: '#722ED1',
-      z: '#13C2C2',
-    },
+    acc: { x: '#D32F2F', y: '#388E3C', z: '#1976D2' },  // 更高饱和度，更深的颜色
+    gyro: { x: '#E65100', y: '#6A1B9A', z: '#00838F' },
   };
 
-  const handleMouseMove = (e: any) => {
-    if (e && e.activeLabel !== undefined) {
-      const time = parseFloat(e.activeLabel);
-      setMousePosition(time);
-      
-      // Update tooltip position
-      if (chartRef.current && e.chartX !== undefined && e.chartY !== undefined) {
-        setTooltipPosition({ x: e.chartX, y: e.chartY });
-      }
-      
-      // Handle different tool modes
-      if (toolMode === 'annotate' && dragStart !== null) {
-        setDragEnd(time);
-      } else if (toolMode === 'zoom' && dragStart !== null) {
-        setDragEnd(time);
-      }
+  // uPlot options
+  const uplotOptions = useMemo((): uPlot.Options => {
+    // Calculate Y axis range
+    let yMin: number | null = null;
+    let yMax: number | null = null;
+
+    if (yAxisDomain) {
+      [yMin, yMax] = yAxisDomain;
     }
-  };
 
-  const handleMouseDown = (e: any) => {
-    if (!e || e.activeLabel === undefined) return;
-    
-    const time = parseFloat(e.activeLabel);
-    
-    if (toolMode === 'annotate') {
-      setDragStart(time);
-      setDragEnd(time);
-    } else if (toolMode === 'zoom') {
-      setDragStart(time);
-      setDragEnd(time);
-    } else if (toolMode === 'pan' && e.chartX !== undefined) {
-      setPanStartX(e.chartX);
-      setPanStartViewport(viewport);
-    }
-  };
+    return {
+      width: dimensions.width,
+      height: dimensions.height,
+      scales: {
+        x: {
+          time: false,
+          range: [viewport.start, viewport.end],
+        },
+        y: {
+          range: yMin !== null && yMax !== null ? [yMin, yMax] : undefined,
+        },
+      },
+      axes: [
+        {
+          stroke: '#BDBDBD',
+          grid: { stroke: '#F5F5F5', width: 1 },  // 更淡的网格线
+          ticks: { stroke: '#BDBDBD' },
+          values: (u, vals) => vals.map((v) => `${v.toFixed(1)}s`),
+        },
+        {
+          stroke: '#BDBDBD',
+          grid: { stroke: '#F5F5F5', width: 1 },
+          ticks: { stroke: '#BDBDBD' },
+        },
+      ],
+      series: [
+        {},
+        {
+          label: `${channel.toUpperCase()}-X`,
+          stroke: colors[channel].x,
+          width: 1.5,  // 细线条
+          points: { show: false },
+        },
+        {
+          label: `${channel.toUpperCase()}-Y`,
+          stroke: colors[channel].y,
+          width: 1.5,
+          points: { show: false },
+        },
+        {
+          label: `${channel.toUpperCase()}-Z`,
+          stroke: colors[channel].z,
+          width: 1.5,
+          points: { show: false },
+        },
+      ],
+      cursor: {
+        drag: { x: false, y: false },
+        points: { show: false },
+      },
+      legend: { show: false },
+    };
+  }, [dimensions, viewport, channel, colors, yAxisDomain]);
 
-  const handleMouseUp = (e: any) => {
-    if (toolMode === 'annotate' && dragStart !== null && dragEnd !== null) {
-      if (Math.abs(dragEnd - dragStart) > 0.5) {
-        onCreateAnnotation(dragStart, dragEnd);
-      }
-      setDragStart(null);
-      setDragEnd(null);
-    } else if (toolMode === 'zoom' && dragStart !== null && dragEnd !== null) {
-      if (Math.abs(dragEnd - dragStart) > 0.5) {
-        const newStart = Math.min(dragStart, dragEnd);
-        const newEnd = Math.max(dragStart, dragEnd);
-        onViewportChange?.({ start: newStart, end: newEnd });
-      }
-      setDragStart(null);
-      setDragEnd(null);
-    } else if (toolMode === 'pan') {
-      setPanStartX(null);
-    }
-  };
-
-  const handleMouseLeave = () => {
-    setMousePosition(null);
-    setDragStart(null);
-    setDragEnd(null);
-    setPanStartX(null);
-  };
-
-  // Handle pan movement
-  const handleChartMouseMove = (e: React.MouseEvent) => {
-    if (toolMode === 'pan' && panStartX !== null && chartRef.current) {
-      const rect = chartRef.current.getBoundingClientRect();
-      const deltaX = e.clientX - panStartX - rect.left;
-      const deltaTime = -(deltaX / rect.width) * (viewport.end - viewport.start);
-      
-      const duration = panStartViewport.end - panStartViewport.start;
-      let newStart = panStartViewport.start + deltaTime;
-      let newEnd = panStartViewport.end + deltaTime;
-      
-      // Find min and max time in data
-      const minTime = Math.min(...data.map(d => d.time));
-      const maxTime = Math.max(...data.map(d => d.time));
-      
-      // Clamp to bounds
-      if (newStart < minTime) {
-        newStart = minTime;
-        newEnd = minTime + duration;
-      }
-      if (newEnd > maxTime) {
-        newEnd = maxTime;
-        newStart = maxTime - duration;
-      }
-      
-      onViewportChange?.({ start: newStart, end: newEnd });
-    }
-  };
-
-  // Right click to zoom out (for zoom tool)
-  const handleContextMenu = (e: React.MouseEvent) => {
-    if (toolMode === 'zoom') {
-      e.preventDefault();
-      // Zoom out by 50%
-      const duration = viewport.end - viewport.start;
-      const center = (viewport.start + viewport.end) / 2;
-      const newDuration = duration * 1.5;
-      
-      const minTime = Math.min(...data.map(d => d.time));
-      const maxTime = Math.max(...data.map(d => d.time));
-      
-      let newStart = center - newDuration / 2;
-      let newEnd = center + newDuration / 2;
-      
-      newStart = Math.max(minTime, newStart);
-      newEnd = Math.min(maxTime, newEnd);
-      
-      onViewportChange?.({ start: newStart, end: newEnd });
-    }
-  };
+  const { containerRef: uplotContainerRef, plotRef } = useUplot(
+    uplotData,
+    uplotOptions,
+    [viewport, channel, yAxisDomain]
+  );
 
   // Get cursor style based on tool mode
   const getCursorStyle = () => {
@@ -177,113 +153,158 @@ export function TimeSeriesChart({
     return 'default';
   };
 
-  // Filter annotations for current viewport
-  const visibleAnnotations = annotations.filter(
-    (a) => a.endTime >= viewport.start && a.startTime <= viewport.end
-  );
+  // Handle mouse events
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!plotRef.current) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const time = pixelToTime(x, viewport.start, viewport.end, dimensions.width);
+
+    if (toolMode === 'annotate' || toolMode === 'zoom') {
+      setDragStart(time);
+      setDragEnd(time);
+    }
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!plotRef.current) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const time = pixelToTime(x, viewport.start, viewport.end, dimensions.width);
+
+    setMousePosition({ x, time });
+
+    if (dragStart !== null) {
+      setDragEnd(time);
+    }
+  };
+
+  const handleCanvasMouseUp = () => {
+    if (dragStart !== null && dragEnd !== null) {
+      const minTime = Math.min(dragStart, dragEnd);
+      const maxTime = Math.max(dragStart, dragEnd);
+
+      if (Math.abs(maxTime - minTime) > 0.5) {
+        if (toolMode === 'annotate') {
+          onCreateAnnotation(minTime, maxTime);
+        } else if (toolMode === 'zoom') {
+          onViewportChange?.({ start: minTime, end: maxTime });
+        }
+      }
+    }
+
+    setDragStart(null);
+    setDragEnd(null);
+  };
+
+  const handleCanvasMouseLeave = () => {
+    setMousePosition(null);
+    setDragStart(null);
+    setDragEnd(null);
+  };
+
+  // Handle right-click zoom out
+  const handleContextMenu = (e: React.MouseEvent) => {
+    if (toolMode === 'zoom') {
+      e.preventDefault();
+      const duration = viewport.end - viewport.start;
+      const center = (viewport.start + viewport.end) / 2;
+      const newDuration = duration * 1.5;
+
+      const minTime = Math.min(...data.map((d) => d.time));
+      const maxTime = Math.max(...data.map((d) => d.time));
+
+      let newStart = center - newDuration / 2;
+      let newEnd = center + newDuration / 2;
+
+      newStart = Math.max(minTime, newStart);
+      newEnd = Math.min(maxTime, newEnd);
+
+      onViewportChange?.({ start: newStart, end: newEnd });
+    }
+  };
+
+  // Prepare drag selection for overlay
+  const dragSelection =
+    dragStart !== null && dragEnd !== null
+      ? {
+          start: dragStart,
+          end: dragEnd,
+          color:
+            toolMode === 'zoom'
+              ? '#909399'
+              : selectedLabels[0]?.color || '#1890FF',
+        }
+      : null;
 
   return (
     <div
-      ref={chartRef}
-      className="relative bg-white rounded-lg border border-[#E4E7ED] p-4 h-[300px]"
-      onMouseUp={handleMouseUp}
-      onMouseMove={handleChartMouseMove}
+      ref={containerRef}
+      className="relative bg-white h-[300px]"
       onContextMenu={handleContextMenu}
       style={{ cursor: getCursorStyle() }}
     >
-      <div className="mb-2">
-        <h3 className="text-sm font-medium text-[#2C3E50]">
-          {channel === 'acc' ? 'Accelerometer (ACC)' : 'Gyroscope (GYRO)'}
-        </h3>
-      </div>
-      <ResponsiveContainer width="100%" height="90%">
-        <LineChart
-          data={filteredData}
-          margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
-          onMouseMove={handleMouseMove}
-          onMouseDown={handleMouseDown}
-          onMouseLeave={handleMouseLeave}
-        >
-          <CartesianGrid strokeDasharray="3 3" stroke="#E4E7ED" />
-          <XAxis
-            dataKey="time"
-            type="number"
-            domain={[viewport.start, viewport.end]}
-            tickFormatter={(val) => `${val.toFixed(1)}s`}
-            stroke="#909399"
-            style={{ fontSize: '12px' }}
-          />
-          <YAxis 
-            stroke="#909399" 
-            style={{ fontSize: '12px' }}
-            domain={yAxisDomain || ['auto', 'auto']}
-          />
 
-          {/* Annotation regions */}
-          {visibleAnnotations.map((annotation) => (
-            <ReferenceArea
-              key={annotation.id}
-              x1={annotation.startTime}
-              x2={annotation.endTime}
-              fill={annotation.color}
-              fillOpacity={hoveredRegionId === annotation.id ? 0.25 : 0.1}
-              stroke={annotation.color}
-              strokeWidth={hoveredRegionId === annotation.id ? 2 : 1}
-              strokeOpacity={0.5}
-            />
-          ))}
+      <div className="relative" style={{ width: dimensions.width, height: dimensions.height }}>
+        {/* uPlot chart */}
+        <div ref={uplotContainerRef} />
 
-          {/* Current drag selection */}
-          {dragStart !== null && dragEnd !== null && (
-            <ReferenceArea
-              x1={dragStart}
-              x2={dragEnd}
-              fill={toolMode === 'zoom' ? '#909399' : (selectedLabel?.color || '#1890FF')}
-              fillOpacity={0.2}
-              stroke={toolMode === 'zoom' ? '#909399' : (selectedLabel?.color || '#1890FF')}
-              strokeWidth={2}
-            />
-          )}
-
-          <Line
-            type="monotone"
-            dataKey={channel === 'acc' ? 'accX' : 'gyroX'}
-            stroke={colors[channel].x}
-            strokeWidth={1.5}
-            dot={false}
-            isAnimationActive={false}
-          />
-          <Line
-            type="monotone"
-            dataKey={channel === 'acc' ? 'accY' : 'gyroY'}
-            stroke={colors[channel].y}
-            strokeWidth={1.5}
-            dot={false}
-            isAnimationActive={false}
-          />
-          <Line
-            type="monotone"
-            dataKey={channel === 'acc' ? 'accZ' : 'gyroZ'}
-            stroke={colors[channel].z}
-            strokeWidth={1.5}
-            dot={false}
-            isAnimationActive={false}
-          />
-        </LineChart>
-      </ResponsiveContainer>
-
-      {/* Time tooltip */}
-      {mousePosition !== null && tooltipPosition.x > 0 && (
-        <div
-          className="absolute bg-[#2C3E50] text-white text-xs px-2 py-1 rounded pointer-events-none z-10"
-          style={{
-            left: `${tooltipPosition.x}px`,
-            top: '40px',
-          }}
-        >
-          T+{mousePosition.toFixed(1)}s
+        {/* 左上角通道名称（工业风格） */}
+        <div className="absolute top-2 left-2 pointer-events-none">
+          <span className="text-4xl font-bold text-[#BDBDBD] opacity-25">
+            {channel.toUpperCase()}
+          </span>
         </div>
-      )}
+
+        {/* 右上角图例 */}
+        <div className="absolute top-2 right-2 flex gap-3 pointer-events-none">
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-0.5" style={{ backgroundColor: colors[channel].x }} />
+            <span className="text-xs font-medium" style={{ color: colors[channel].x }}>X</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-0.5" style={{ backgroundColor: colors[channel].y }} />
+            <span className="text-xs font-medium" style={{ color: colors[channel].y }}>Y</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-0.5" style={{ backgroundColor: colors[channel].z }} />
+            <span className="text-xs font-medium" style={{ color: colors[channel].z }}>Z</span>
+          </div>
+        </div>
+
+        {/* Overlay canvas for annotations */}
+        <OverlayCanvas
+          width={dimensions.width}
+          height={dimensions.height}
+          annotations={annotations}
+          viewport={viewport}
+          hoveredRegionId={hoveredRegionId}
+          dragSelection={dragSelection}
+          mousePosition={mousePosition}
+          onMouseDown={handleCanvasMouseDown}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleCanvasMouseUp}
+          onMouseLeave={handleCanvasMouseLeave}
+          cursor={getCursorStyle()}
+          showVerticalLines={true}
+        />
+
+        {/* Time tooltip - \u8ddf\u968f\u9f20\u6807\u663e\u793a */}
+        {mousePosition !== null && !dragStart && (
+          <div
+            className="absolute bg-[#2C3E50] text-white text-xs px-2 py-1 rounded pointer-events-none z-20 shadow-lg"
+            style={{
+              left: `${mousePosition.x + 10}px`,
+              top: '5px',
+              transform: mousePosition.x > dimensions.width - 80 ? 'translateX(-100%)' : 'none',
+            }}
+          >
+            T+{mousePosition.time.toFixed(2)}s
+          </div>
+        )}
+      </div>
     </div>
   );
 }

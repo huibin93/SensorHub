@@ -1,4 +1,4 @@
-import { Move, ZoomIn, Maximize2, Target, Edit3 } from 'lucide-react';
+import { Move, ZoomIn, Target, Edit3 } from 'lucide-react';
 import { useState } from 'react';
 
 export type ToolMode = 'pan' | 'zoom' | 'annotate' | null;
@@ -6,7 +6,6 @@ export type ToolMode = 'pan' | 'zoom' | 'annotate' | null;
 interface ChartToolbarProps {
   activeMode: ToolMode;
   onModeChange: (mode: ToolMode) => void;
-  onAutoFit: () => void;
   onAutoAxis: () => void;
   onZoomOut: () => void;
 }
@@ -14,7 +13,6 @@ interface ChartToolbarProps {
 export function ChartToolbar({
   activeMode,
   onModeChange,
-  onAutoFit,
   onAutoAxis,
   onZoomOut,
 }: ChartToolbarProps) {
@@ -59,14 +57,6 @@ export function ChartToolbar({
 
       {/* Action Buttons */}
       <div className="flex items-center gap-1">
-        <button
-          className="px-3 py-1.5 text-xs font-medium text-[#2C3E50] hover:bg-white rounded transition-colors"
-          onClick={onAutoFit}
-          title="自适应Y轴"
-        >
-          <Maximize2 className="w-4 h-4 inline mr-1" />
-          自适应Y轴
-        </button>
         <button
           className="px-3 py-1.5 text-xs font-medium text-[#2C3E50] hover:bg-white rounded transition-colors"
           onClick={onAutoAxis}
