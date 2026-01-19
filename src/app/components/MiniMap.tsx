@@ -51,27 +51,22 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
   }, [downsampledData]);
 
   // uPlot options
+  const axisHeight = 20; // px reserved inside minimap for x-axis labels
+
   const uplotOptions = useMemo((): uPlot.Options => {
     return {
       width: dimensions.width,
-      height: dimensions.height - 12,  // 为X轴标签预留较少空间，增加图表高度
+      // make uPlot use the full available height minus our internal axis band
+      height: Math.max(24, dimensions.height - axisHeight),
       scales: {
         x: {
           time: false,
           range: [0, totalDuration],
         },
       },
+      // hide uPlot's built-in x-axis so we can render labels inside the box
       axes: [
-        {
-          show: true,
-          stroke: '#BDBDBD',
-          grid: { show: false },
-          ticks: { stroke: '#BDBDBD', size: 4 },
-          font: '10px sans-serif',
-          labelSize: 16,
-          gap: 2,
-          values: (u, vals) => vals.map(v => `${v.toFixed(1)}s`),
-        },
+        { show: false },
         { show: false },
       ],
       series: [
@@ -197,66 +192,75 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
       className="relative h-full bg-white overflow-hidden minimap-background"
       onMouseDown={handleContainerMouseDown}
     >
-      {/* Background chart */}
-      <div ref={uplotContainerRef} className="absolute inset-0 minimap-background" />
+      {/* Background chart - reserve bottom axisHeight px for our internal x-axis */}
+      <div
+        ref={uplotContainerRef}
+        className="absolute left-0 right-0 top-0 minimap-background"
+        style={{ bottom: `${axisHeight}px` }}
+      />
 
-      {/* Annotation regions background (工业风格色块) */}
-      <div className="absolute inset-0 pointer-events-none">
-        {annotations.map((annotation) => {
-          const leftPercent = (annotation.startTime / totalDuration) * 100;
-          const widthPercent = ((annotation.endTime - annotation.startTime) / totalDuration) * 100;
+          {/* Annotation regions background (工业风格色块) */}
+          <div className="absolute left-0 right-0 top-0 pointer-events-none" style={{ bottom: `${axisHeight}px` }}>
+            {annotations.map((annotation) => {
+              const leftPercent = (annotation.startTime / totalDuration) * 100;
+              const widthPercent = ((annotation.endTime - annotation.startTime) / totalDuration) * 100;
           
-          return (
-            <div
-              key={annotation.id}
-              className="absolute top-0 bottom-0"
-              style={{
-                left: `${leftPercent}%`,
-                width: `${widthPercent}%`,
-                backgroundColor: annotation.color,
-                opacity: 0.25,
-              }}
-            />
-          );
-        })}
-      </div>
+              return (
+                <div
+                  key={annotation.id}
+                  className="absolute top-0"
+                  style={{
+                    left: `${leftPercent}%`,
+                    width: `${widthPercent}%`,
+                    height: `calc(100% )`,
+                    backgroundColor: annotation.color,
+                    opacity: 0.25,
+                    overflow: 'hidden',
+                  }}
+                />
+              );
+            })}
+          </div>
 
       {/* Dimmed areas outside viewport */}
-      <div className="absolute inset-0 pointer-events-none">
+      <div className="absolute left-0 right-0 top-0 pointer-events-none" style={{ bottom: `${axisHeight}px` }}>
         <div
-          className="absolute top-0 bottom-0 left-0 bg-white/70"
-          style={{ width: `${viewportLeftPercent}%` }}
+          className="absolute top-0 left-0 bg-white/70"
+          style={{ width: `${viewportLeftPercent}%`, bottom: 0 }}
         />
         <div
-          className="absolute top-0 bottom-0 right-0 bg-white/70"
-          style={{ width: `${100 - viewportLeftPercent - viewportWidthPercent}%` }}
+          className="absolute top-0 right-0 bg-white/70"
+          style={{ width: `${100 - viewportLeftPercent - viewportWidthPercent}%`, bottom: 0 }}
         />
       </div>
 
       {/* Selection box (框选区域) */}
       {isSelecting && selectionStart !== null && selectionEnd !== null && (
         <div
-          className="absolute top-0 bottom-0 pointer-events-none"
+          className="absolute top-0 pointer-events-none"
           style={{
             left: `${(Math.min(selectionStart, selectionEnd) / totalDuration) * 100}%`,
             width: `${(Math.abs(selectionEnd - selectionStart) / totalDuration) * 100}%`,
-            backgroundColor: 'rgba(24, 144, 255, 0.2)',
-            border: '2px dashed #1890FF',
+            backgroundColor: 'rgba(24, 144, 255, 0.15)',
+            border: '1px dashed #1890FF',
+            bottom: `${axisHeight}px`,
           }}
         />
       )}
 
       {/* Viewport window */}
       <div
-        className="absolute top-0 bottom-0 border border-[#1890FF] bg-transparent"
+        className="absolute top-0 border border-[#1890FF] bg-transparent"
         style={{
           left: `${viewportLeftPercent}%`,
           width: `${viewportWidthPercent}%`,
+          bottom: `${axisHeight}px`,
         }}
       >
-        {/* Left handle */}
+        {/* Left handle (inside viewport) */}
         <div
-          className="absolute top-0 bottom-0 -left-1 w-2 bg-[#1890FF] cursor-ew-resize hover:bg-[#40a9ff] transition-colors"
+          className="absolute top-0 left-0 w-2 bg-[#1890FF] cursor-ew-resize hover:bg-[#40a9ff] transition-colors"
+          style={{ bottom: 0, height: '100%' }}
           onMouseDown={(e) => handleMouseDown(e, 'left')}
         >
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-4 bg-white rounded" />
@@ -264,18 +268,50 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
 
         {/* Center drag area */}
         <div
-          className="absolute inset-0 cursor-grab active:cursor-grabbing"
+          className="absolute top-0 left-0 right-0 cursor-grab active:cursor-grabbing"
+          style={{ bottom: 0, height: '100%' }}
           onMouseDown={(e) => handleMouseDown(e, 'drag')}
         />
 
-        {/* Right handle */}
+        {/* Right handle (inside viewport) */}
         <div
-          className="absolute top-0 bottom-0 -right-1 w-2 bg-[#1890FF] cursor-ew-resize hover:bg-[#40a9ff] transition-colors"
+          className="absolute top-0 right-0 w-2 bg-[#1890FF] cursor-ew-resize hover:bg-[#40a9ff] transition-colors"
+          style={{ bottom: 0, height: '100%' }}
           onMouseDown={(e) => handleMouseDown(e, 'right')}
         >
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-4 bg-white rounded" />
         </div>
       </div>
+
+      {/* x-axis hairline at top of axis area */}
+        {/* axis hairline sits at the bottom of the axis band (under labels) */}
+        <div
+          className="absolute left-0 right-0"
+          style={{ bottom: `0px`, height: '1px', backgroundColor: '#E0E0E0', zIndex: 0 }}
+        />
+
+      {/* Internal X-axis rendered inside the minimap box */}
+        <div
+          className="absolute left-0 right-0 bottom-0 h-5 flex items-center pointer-events-none"
+          style={{ height: `${axisHeight}px`, zIndex: 10 }}
+        >
+          <div className="relative w-full">
+            {/* ticks */}
+            {Array.from({ length: 5 }).map((_, i) => {
+              const t = (i / 4) * totalDuration;
+              const left = (t / totalDuration) * 100;
+              return (
+                <div
+                  key={i}
+                  className="absolute text-xs text-[#9E9E9E]"
+                  style={{ left: `${left}%`, transform: 'translateX(-50%)', bottom: -8 }}
+                >
+                    {Math.round(t)}
+                </div>
+              );
+            })}
+          </div>
+        </div>
     </div>
   );
 }

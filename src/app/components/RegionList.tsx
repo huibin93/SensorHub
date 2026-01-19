@@ -20,7 +20,7 @@ export function RegionList({
   onRegionEdit 
 }: RegionListProps) {
   const formatTime = (seconds: number) => {
-    return `${seconds.toFixed(1)}s`;
+    return `${Math.round(seconds)}`;
   };
 
   return (

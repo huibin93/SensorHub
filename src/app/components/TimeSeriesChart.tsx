@@ -37,6 +37,7 @@ export function TimeSeriesChart({
   const [mousePosition, setMousePosition] = useState<{ x: number; time: number } | null>(null);
   const [dragStart, setDragStart] = useState<number | null>(null);
   const [dragEnd, setDragEnd] = useState<number | null>(null);
+  const [isHovering, setIsHovering] = useState(false);
   const { pixelToTime, timeToPixel } = useRegions();
 
   // Handle resize
@@ -102,7 +103,8 @@ export function TimeSeriesChart({
           stroke: '#BDBDBD',
           grid: { stroke: '#F5F5F5', width: 1 },  // 更淡的网格线
           ticks: { stroke: '#BDBDBD' },
-          values: (u, vals) => vals.map((v) => `${v.toFixed(1)}s`),
+          // show integer tick labels without unit
+          values: (u, vals) => vals.map((v) => `${Math.round(v)}`),
         },
         {
           stroke: '#BDBDBD',
@@ -145,8 +147,9 @@ export function TimeSeriesChart({
     [viewport, channel, yAxisDomain]
   );
 
-  // Get cursor style based on tool mode
+  // Get cursor style based on tool mode and hover state
   const getCursorStyle = () => {
+    if (isHovering) return 'crosshair';
     if (toolMode === 'pan') return 'grab';
     if (toolMode === 'zoom') return 'crosshair';
     if (toolMode === 'annotate') return 'cell';
@@ -247,7 +250,12 @@ export function TimeSeriesChart({
       style={{ cursor: getCursorStyle() }}
     >
 
-      <div className="relative" style={{ width: dimensions.width, height: dimensions.height }}>
+      <div 
+        className="relative" 
+        style={{ width: dimensions.width, height: dimensions.height }}
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
+      >
         {/* uPlot chart */}
         <div ref={uplotContainerRef} />
 
