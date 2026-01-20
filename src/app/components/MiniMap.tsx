@@ -23,6 +23,10 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
 
+  // 获取数据的实际时间范围（确保 MiniMap 显示所有数据）
+  const dataMin = useMemo(() => data.length > 0 ? data[0].time : 0, [data]);
+  const dataMax = useMemo(() => data.length > 0 ? data[data.length - 1].time : totalDuration, [data, totalDuration]);
+
   // Handle resize
   useEffect(() => {
     if (!containerRef.current) return;
@@ -61,7 +65,7 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
       scales: {
         x: {
           time: false,
-          range: [0, totalDuration],
+          range: [dataMin, dataMax],  // 使用数据的实际时间范围
         },
       },
       // hide uPlot's built-in x-axis so we can render labels inside the box
@@ -82,13 +86,16 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
     };
   }, [dimensions, totalDuration]);
 
-  const { containerRef: uplotContainerRef } = useUplot(uplotData, uplotOptions, [totalDuration]);
-
+  const { containerRef: uplotContainerRef } = useUplot(uplotData, uplotOptions, [dataMin, dataMax]);
+  // 计算百分比位置的辅助函数（确保对齐）
+  const getLeftPercent = (time: number) => {
+    return ((time - dataMin) / (dataMax - dataMin)) * 100;
+  };
   const getTimeFromPosition = (clientX: number): number => {
-    if (!containerRef.current) return 0;
+    if (!containerRef.current) return dataMin;
     const rect = containerRef.current.getBoundingClientRect();
     const ratio = (clientX - rect.left) / rect.width;
-    return Math.max(0, Math.min(totalDuration, ratio * totalDuration));
+    return Math.max(dataMin, Math.min(dataMax, dataMin + ratio * (dataMax - dataMin)));
   };
 
   const handleMouseDown = (e: React.MouseEvent, type: 'drag' | 'left' | 'right') => {
@@ -128,7 +135,7 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
 
     const rect = containerRef.current.getBoundingClientRect();
     const deltaX = e.clientX - dragStartX;
-    const deltaTime = (deltaX / rect.width) * totalDuration;
+    const deltaTime = (deltaX / rect.width) * (dataMax - dataMin);
 
     if (isDragging) {
       const duration = viewport.end - viewport.start;
@@ -136,21 +143,21 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
       let newEnd = initialViewport.end + deltaTime;
 
       // Clamp to bounds
-      if (newStart < 0) {
-        newStart = 0;
-        newEnd = duration;
+      if (newStart < dataMin) {
+        newStart = dataMin;
+        newEnd = dataMin + duration;
       }
-      if (newEnd > totalDuration) {
-        newEnd = totalDuration;
-        newStart = totalDuration - duration;
+      if (newEnd > dataMax) {
+        newEnd = dataMax;
+        newStart = dataMax - duration;
       }
 
       onViewportChange({ start: newStart, end: newEnd });
     } else if (isResizing === 'left') {
-      const newStart = Math.max(0, Math.min(initialViewport.end - 1, initialViewport.start + deltaTime));
+      const newStart = Math.max(dataMin, Math.min(initialViewport.end - 1, initialViewport.start + deltaTime));
       onViewportChange({ start: newStart, end: viewport.end });
     } else if (isResizing === 'right') {
-      const newEnd = Math.min(totalDuration, Math.max(initialViewport.start + 1, initialViewport.end + deltaTime));
+      const newEnd = Math.min(dataMax, Math.max(initialViewport.start + 1, initialViewport.end + deltaTime));
       onViewportChange({ start: viewport.start, end: newEnd });
     }
   };
@@ -183,8 +190,8 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
     }
   }, [isDragging, isResizing, dragStartX, initialViewport]);
 
-  const viewportLeftPercent = (viewport.start / totalDuration) * 100;
-  const viewportWidthPercent = ((viewport.end - viewport.start) / totalDuration) * 100;
+  const viewportLeftPercent = getLeftPercent(viewport.start);
+  const viewportWidthPercent = ((viewport.end - viewport.start) / (dataMax - dataMin)) * 100;
 
   return (
     <div
@@ -202,8 +209,8 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
           {/* Annotation regions background (工业风格色块) */}
           <div className="absolute left-0 right-0 top-0 pointer-events-none" style={{ bottom: `${axisHeight}px` }}>
             {annotations.map((annotation) => {
-              const leftPercent = (annotation.startTime / totalDuration) * 100;
-              const widthPercent = ((annotation.endTime - annotation.startTime) / totalDuration) * 100;
+              const leftPercent = getLeftPercent(annotation.startTime);
+              const widthPercent = ((annotation.endTime - annotation.startTime) / (dataMax - dataMin)) * 100;
           
               return (
                 <div
@@ -239,8 +246,8 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
         <div
           className="absolute top-0 pointer-events-none"
           style={{
-            left: `${(Math.min(selectionStart, selectionEnd) / totalDuration) * 100}%`,
-            width: `${(Math.abs(selectionEnd - selectionStart) / totalDuration) * 100}%`,
+            left: `${getLeftPercent(Math.min(selectionStart, selectionEnd))}%`,
+            width: `${(Math.abs(selectionEnd - selectionStart) / (dataMax - dataMin)) * 100}%`,
             backgroundColor: 'rgba(24, 144, 255, 0.15)',
             border: '1px dashed #1890FF',
             bottom: `${axisHeight}px`,
@@ -298,8 +305,8 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
           <div className="relative w-full">
             {/* ticks */}
             {Array.from({ length: 5 }).map((_, i) => {
-              const t = (i / 4) * totalDuration;
-              const left = (t / totalDuration) * 100;
+              const t = dataMin + (i / 4) * (dataMax - dataMin);
+              const left = getLeftPercent(t);
               return (
                 <div
                   key={i}

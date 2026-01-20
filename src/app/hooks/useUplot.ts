@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import uPlot from 'uplot';
 
 export interface UplotOptions {
@@ -21,20 +21,49 @@ export function useUplot(
   const plotRef = useRef<uPlot | null>(null);
   const [isReady, setIsReady] = useState(false);
 
-  // Initialize uPlot
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const plot = new uPlot(options, data, containerRef.current);
-    plotRef.current = plot;
-    setIsReady(true);
-
-    return () => {
-      plot.destroy();
+  // Initialize uPlot using useLayoutEffect to ensure DOM is measured
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    
+    // Destroy existing plot if any
+    if (plotRef.current) {
+      try {
+        plotRef.current.destroy();
+      } catch (e) {
+        console.warn('Error destroying plot:', e);
+      }
       plotRef.current = null;
       setIsReady(false);
+    }
+
+    // Strict validation
+    if (!container || 
+        !(container instanceof HTMLElement) || 
+        !container.isConnected) {
+      return;
+    }
+    
+    try {
+      const plot = new uPlot(options, data, container);
+      plotRef.current = plot;
+      setIsReady(true);
+    } catch (error) {
+      console.error('Failed to initialize uPlot:', error);
+    }
+
+    return () => {
+      if (plotRef.current) {
+        try {
+          plotRef.current.destroy();
+        } catch (e) {
+          console.warn('Error destroying plot:', e);
+        }
+        plotRef.current = null;
+      }
+      setIsReady(false);
     };
-  }, [containerRef.current, ...deps]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
 
   // Update data
   useEffect(() => {
