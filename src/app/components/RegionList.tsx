@@ -66,11 +66,12 @@ export function RegionList({
                 {/* Content */}
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-[#2C3E50] mb-1">
-                    {annotation.label}
-                  </div>
-                  <div className="text-xs text-[#909399]">
-                    {formatTime(annotation.startTime)} - {formatTime(annotation.endTime)}
-                  </div>
+                      {annotation.regionName ?? annotation.label}
+                    </div>
+                    <div className="text-xs text-[#909399]">
+                      <span className="mr-2">{annotation.label}</span>
+                      <span>{formatTime(annotation.startTime)} - {formatTime(annotation.endTime)}</span>
+                    </div>
                 </div>
 
                 {/* Actions */}

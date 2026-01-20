@@ -32,6 +32,8 @@ export interface TimeSeriesDataPoint {
 export interface AnnotationRegion {
   id: string;
   label: string;
+  // Auto-generated region name, e.g. "label_001"
+  regionName?: string;
   startTime: number;
   endTime: number;
   color: string;

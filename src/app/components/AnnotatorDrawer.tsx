@@ -19,10 +19,13 @@ interface AnnotatorDrawerProps {
 
 export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelTypes }: AnnotatorDrawerProps) {
   const [activeChannels, setActiveChannels] = useState({ acc: true, gyro: true });
+  // Default to all labels selected when opening
   const [selectedLabels, setSelectedLabels] = useState<LabelType[]>(initialLabelTypes);
   const [annotations, setAnnotations] = useState<AnnotationRegion[]>([]);
   const [viewport, setViewport] = useState({ start: 0, end: 30 });
   const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
+  const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
+  const [sharedMouseTime, setSharedMouseTime] = useState<number | null>(null);
   const [autoSaveMessage, setAutoSaveMessage] = useState(false);
   const [toolMode, setToolMode] = useState<ToolMode>(null);
   const [labelTypes, setLabelTypes] = useState<LabelType[]>(initialLabelTypes);
@@ -31,7 +34,12 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
 
   useEffect(() => {
     if (fileDetail) {
-      setAnnotations(fileDetail.annotations);
+      // Normalize annotations to use sequential numeric regionName (001,002...)
+      const normalized = fileDetail.annotations.map((a, idx) => ({
+        ...a,
+        regionName: String(idx + 1).padStart(3, '0'),
+      }));
+      setAnnotations(normalized);
       setViewport({ start: 0, end: Math.min(30, fileDetail.totalDuration) });
     }
   }, [fileDetail]);
@@ -56,12 +64,18 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
       toast.error('请先选择标签类型');
       return;
     }
+    const roundToTenth = (v: number) => Math.round(v * 10) / 10;
+    const s = roundToTenth(Math.min(startTime, endTime));
+    const e = roundToTenth(Math.max(startTime, endTime));
 
+    const nextIndex = annotations.length + 1;
     const newAnnotation: AnnotationRegion = {
       id: Date.now().toString(),
       label: labelToUse.name,
-      startTime: Math.min(startTime, endTime),
-      endTime: Math.max(startTime, endTime),
+      // Use sequential numeric region names (001, 002, ...)
+      regionName: String(nextIndex).padStart(3, '0'),
+      startTime: s,
+      endTime: e,
       color: labelToUse.color,
     };
 
@@ -70,7 +84,11 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
   };
 
   const handleDeleteAnnotation = (id: string) => {
-    setAnnotations(prev => prev.filter(a => a.id !== id));
+    setAnnotations(prev => {
+      const remaining = prev.filter(a => a.id !== id);
+      // Reassign sequential numeric regionName values so numbering stays contiguous
+      return remaining.map((a, idx) => ({ ...a, regionName: String(idx + 1).padStart(3, '0') }));
+    });
     showAutoSaveMessage();
   };
 
@@ -96,10 +114,21 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
   };
 
   const handleSaveEditedAnnotation = (editedAnnotation: AnnotationRegion) => {
+    const roundToTenth = (v: number) => Math.round(v * 10) / 10;
+    const normalized = {
+      ...editedAnnotation,
+      startTime: roundToTenth(editedAnnotation.startTime),
+      endTime: roundToTenth(editedAnnotation.endTime),
+    };
+
     setAnnotations(prev => 
-      prev.map(a => a.id === editedAnnotation.id ? editedAnnotation : a)
+      prev.map(a => a.id === normalized.id ? normalized : a)
     );
     showAutoSaveMessage();
+  };
+
+  const handleUpdateAnnotation = (updated: AnnotationRegion) => {
+    setAnnotations(prev => prev.map(a => a.id === updated.id ? updated : a));
   };
 
   const showAutoSaveMessage = () => {
@@ -164,9 +193,25 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
   };
 
   // Filter annotations based on selected labels
-  const filteredAnnotations = selectedLabels.length === 0 
-    ? annotations
+  // If no labels selected, do not display any annotations
+  const filteredAnnotations = selectedLabels.length === 0
+    ? []
     : annotations.filter(a => selectedLabels.some(l => l.name === a.label));
+
+  // Sync selection/hover with current filtered annotations:
+  // - If no labels selected, clear selected/hovered region
+  // - If currently selected/hovered region is filtered out, clear it
+  useEffect(() => {
+    if (selectedLabels.length === 0) {
+      setSelectedRegionId(null);
+      setHoveredRegionId(null);
+      return;
+    }
+
+    const ids = new Set(filteredAnnotations.map(a => a.id));
+    if (selectedRegionId && !ids.has(selectedRegionId)) setSelectedRegionId(null);
+    if (hoveredRegionId && !ids.has(hoveredRegionId)) setHoveredRegionId(null);
+  }, [selectedLabels, filteredAnnotations, selectedRegionId, hoveredRegionId]);
 
   return (
     <div className="fixed inset-0 z-50 flex">
@@ -278,6 +323,12 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
                   selectedLabels={selectedLabels}
                   onCreateAnnotation={handleCreateAnnotation}
                   hoveredRegionId={hoveredRegionId}
+                  selectedRegionId={selectedRegionId}
+                  onHoverChange={setHoveredRegionId}
+                  onRegionSelect={setSelectedRegionId}
+                  onUpdateAnnotation={handleUpdateAnnotation}
+                  sharedMouseTime={sharedMouseTime}
+                  onSharedMouseMove={setSharedMouseTime}
                   toolMode={toolMode}
                   onViewportChange={setViewport}
                   yAxisDomain={yAxisDomain}
@@ -292,6 +343,12 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
                   selectedLabels={selectedLabels}
                   onCreateAnnotation={handleCreateAnnotation}
                   hoveredRegionId={hoveredRegionId}
+                  selectedRegionId={selectedRegionId}
+                  onHoverChange={setHoveredRegionId}
+                  onRegionSelect={setSelectedRegionId}
+                  onUpdateAnnotation={handleUpdateAnnotation}
+                  sharedMouseTime={sharedMouseTime}
+                  onSharedMouseMove={setSharedMouseTime}
                   toolMode={toolMode}
                   onViewportChange={setViewport}
                   yAxisDomain={yAxisDomain}
@@ -306,7 +363,7 @@ export function AnnotatorDrawer({ fileDetail, onClose, labelTypes: initialLabelT
                 totalDuration={fileDetail.totalDuration}
                 viewport={viewport}
                 onViewportChange={setViewport}
-                annotations={annotations}
+                  annotations={filteredAnnotations}
               />
             </div>
           </div>

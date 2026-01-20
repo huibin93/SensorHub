@@ -93,31 +93,31 @@ export function generateMockTimeSeriesData(duration: number = 135): TimeSeriesDa
 export const labelTypes: LabelType[] = [
   {
     id: 'running',
-    name: '跑步',
+    name: 'Running',
     color: '#F5222D',
     shortcut: '1',
   },
   {
     id: 'walking',
-    name: '走路',
+    name: 'Walking',
     color: '#52C41A',
     shortcut: '2',
   },
   {
     id: 'sleeping',
-    name: '睡眠',
+    name: 'Sleeping',
     color: '#1890FF',
     shortcut: '3',
   },
   {
     id: 'sitting',
-    name: '静坐',
+    name: 'Sitting',
     color: '#722ED1',
     shortcut: '4',
   },
   {
     id: 'standing',
-    name: '站立',
+    name: 'Standing',
     color: '#FA8C16',
     shortcut: '5',
   },

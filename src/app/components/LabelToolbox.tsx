@@ -14,13 +14,32 @@ interface LabelToolboxProps {
 export function LabelToolbox({ labelTypes, selectedLabels, annotations, onSelectLabels, onAddLabel, onDeleteLabel }: LabelToolboxProps) {
   const handleAddLabel = () => {
     const colors = ['#FA541C', '#13C2C2', '#2F54EB', '#EB2F96', '#52C41A'];
+    // Generate English-only label name following `label_XXX` pattern
+    const nextIndex = labelTypes.length + 1;
+    const generatedName = `label_${String(nextIndex).padStart(3, '0')}`;
     const newLabel: LabelType = {
-      id: `custom-${Date.now()}`,
-      name: `新标签${labelTypes.length + 1}`,
+      id: `label-${String(nextIndex).padStart(3, '0')}`,
+      name: generatedName,
       color: colors[labelTypes.length % colors.length],
       shortcut: '',
     };
     onAddLabel?.(newLabel);
+  };
+
+  // Checkbox toggle: multi-select behavior (stopPropagation to avoid row click)
+  const handleCheckboxToggle = (e: React.MouseEvent, label: LabelType) => {
+    e.stopPropagation();
+    const isSelected = selectedLabels.some(l => l.id === label.id);
+    if (isSelected) {
+      onSelectLabels(selectedLabels.filter(l => l.id !== label.id));
+    } else {
+      onSelectLabels([...selectedLabels, label]);
+    }
+  };
+
+  // Row click: single-select this label (replace selection)
+  const handleRowClick = (label: LabelType) => {
+    onSelectLabels([label]);
   };
 
   // 统计每个标签的使用次数
@@ -111,16 +130,15 @@ export function LabelToolbox({ labelTypes, selectedLabels, annotations, onSelect
                   : 'hover:bg-[#FAFAFA]'
                 }
               `}
-              onClick={() => handleLabelClick(label)}
+              onClick={() => handleRowClick(label)}
             >
-              {/* Color indicator */}
-              <div className="col-span-1">
-                <div
-                  className="w-4 h-4 rounded border-2"
-                  style={{ 
-                    backgroundColor: isSelected ? label.color : 'transparent',
-                    borderColor: label.color 
-                  }}
+              {/* Checkbox for multi-select */}
+              <div className="col-span-1 flex items-center">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onClick={(e) => handleCheckboxToggle(e as any, label)}
+                  onChange={() => { /* handled in onClick to control propagation */ }}
                 />
               </div>
 

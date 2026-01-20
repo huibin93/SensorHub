@@ -88,14 +88,14 @@ export default function App() {
         annotations: [
           {
             id: '1',
-            label: '走路',
+            label: 'Walking',
             startTime: 10,
             endTime: 45,
             color: '#52C41A',
           },
           {
             id: '2',
-            label: '跑步',
+            label: 'Running',
             startTime: 50,
             endTime: 85,
             color: '#F5222D',

@@ -8,8 +8,11 @@ interface OverlayCanvasProps {
   annotations: AnnotationRegion[];
   viewport: { start: number; end: number };
   hoveredRegionId: string | null;
+  selectedRegionId?: string | null;
   dragSelection?: { start: number; end: number; color: string } | null;
   mousePosition?: { x: number; time: number } | null;
+  // nearest point info computed by chart: { idx, time, points: [{series, value, x, y, color}] }
+  nearestInfo?: { idx: number; time: number; points: { series: string; value: number; x: number; y: number; color: string }[] } | null;
   onMouseDown?: (e: React.MouseEvent<HTMLCanvasElement>) => void;
   onMouseMove?: (e: React.MouseEvent<HTMLCanvasElement>) => void;
   onMouseUp?: (e: React.MouseEvent<HTMLCanvasElement>) => void;
@@ -24,8 +27,10 @@ export function OverlayCanvas({
   annotations,
   viewport,
   hoveredRegionId,
+  selectedRegionId,
   dragSelection,
   mousePosition,
+  nearestInfo,
   onMouseDown,
   onMouseMove,
   onMouseUp,
@@ -110,6 +115,7 @@ export function OverlayCanvas({
       const regionWidth = endX - startX;
 
       const isHovered = annotation.id === hoveredRegionId;
+      const isSelected = selectedRegionId ? annotation.id === selectedRegionId : false;
 
       // Parse color and add opacity (Label Studio 风格)
       const color = annotation.color;
@@ -151,7 +157,8 @@ export function OverlayCanvas({
       ctx.strokeRect(centerX - handleWidth / 2, 2, handleWidth, handleHeight);
 
       // Draw edge handles (边缘调整手柄)
-      if (isHovered) {
+      // Show when hovered OR when explicitly selected
+      if (isHovered || isSelected) {
         const edgeHandleWidth = 4;
         const edgeHandleHeight = 30;
         const edgeHandleY = height / 2 - edgeHandleHeight / 2;
@@ -206,17 +213,103 @@ export function OverlayCanvas({
     }
 
     // Draw vertical crosshair (垂直参考线)
-    if (mousePosition && mousePosition.x >= 0 && mousePosition.x <= width) {
-      ctx.strokeStyle = '#424242';
+    if (mousePosition) {
+      const rawX = mousePosition.x;
+      // clamp draw position into canvas bounds
+      const drawX = Math.max(0, Math.min(width, rawX));
+
+      // If rawX is outside bounds, draw a faded indicator at the edge
+      const isClamped = rawX < 0 || rawX > width;
+
+      ctx.strokeStyle = isClamped ? 'rgba(66,66,66,0.25)' : '#424242';
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
-      ctx.moveTo(mousePosition.x + 0.5, 0);
-      ctx.lineTo(mousePosition.x + 0.5, height);
+      ctx.moveTo(drawX + 0.5, 0);
+      ctx.lineTo(drawX + 0.5, height);
       ctx.stroke();
       ctx.setLineDash([]);
+
+      if (isClamped) {
+        // small triangle indicator to show direction
+        ctx.fillStyle = 'rgba(66,66,66,0.25)';
+        const size = 6;
+        if (rawX < 0) {
+          ctx.beginPath();
+          ctx.moveTo(2, height / 2 - size);
+          ctx.lineTo(2, height / 2 + size);
+          ctx.lineTo(2 + size, height / 2);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(width - 2, height / 2 - size);
+          ctx.lineTo(width - 2, height / 2 + size);
+          ctx.lineTo(width - 2 - size, height / 2);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
+      // Draw nearest-point markers + tooltip if provided
+      if ((nearestInfo as any)?.points) {
+        const info = nearestInfo as any;
+        // Draw markers
+        for (const p of info.points) {
+          if (typeof p.y !== 'number' || Number.isNaN(p.y)) continue;
+          ctx.beginPath();
+          ctx.fillStyle = p.color || '#000';
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = '#fff';
+          ctx.stroke();
+        }
+
+        // Prepare lines: time + per-series
+        ctx.font = '12px sans-serif';
+        const timeText = `T   +${info.time.toFixed(1)}s`;
+        const lines = [timeText, ...info.points.map((p: any) => `${p.series}: ${p.value.toFixed(2)}`)];
+
+        // Measure and compute box size with a smaller minimum width
+        const padding = 6;
+        const lineHeight = 16;
+        const minWidth = 64;
+        const maxWidth = Math.max(...lines.map((l: string) => ctx.measureText(l).width));
+        const boxW = Math.max(minWidth, maxWidth + padding * 2);
+        const boxH = lines.length * lineHeight + 6;
+
+        // Position tooltip so it stays inside canvas
+        const tooltipY = 6;
+        const tooltipX = Math.max(8, Math.min(width - boxW - 8, mousePosition.x));
+
+        // Background
+        ctx.fillStyle = 'rgba(44,62,80,0.95)';
+        ctx.fillRect(tooltipX, tooltipY, boxW, boxH);
+
+        // Draw lines
+        ctx.fillStyle = '#fff';
+        for (let i = 0; i < lines.length; i++) {
+          const txt = lines[i];
+          const lx = tooltipX + padding;
+          const ly = tooltipY + padding + 12 + i * lineHeight;
+          // colored dot for series lines (skip first time line)
+          if (i > 0) {
+            const color = info.points[i - 1].color || '#000';
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(tooltipX + 8, ly - 6, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.fillText(txt, lx + 14, ly);
+          } else {
+            ctx.fillText(txt, lx, ly);
+          }
+        }
+      }
     }
-  }, [width, height, annotations, viewport, hoveredRegionId, dragSelection, mousePosition, timeToPixel]);
+  }, [width, height, annotations, viewport, hoveredRegionId, dragSelection, mousePosition, timeToPixel, nearestInfo]);
+
 
   return (
     <canvas
