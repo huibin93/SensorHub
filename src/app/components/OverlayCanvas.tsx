@@ -18,6 +18,7 @@ interface OverlayCanvasProps {
   onMouseUp?: (e: React.MouseEvent<HTMLCanvasElement>) => void;
   onMouseLeave?: () => void;
   cursor?: string;
+  useUplotNativeCursor?: boolean;
 }
 
 export function OverlayCanvas({
@@ -35,6 +36,7 @@ export function OverlayCanvas({
   onMouseUp,
   onMouseLeave,
   cursor = 'default',
+  useUplotNativeCursor = false,
 }: OverlayCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { timeToPixel } = useRegions();
@@ -188,61 +190,63 @@ export function OverlayCanvas({
       ctx.strokeRect(minX, 0, regionWidth, height);
     }
 
-    // Draw vertical crosshair line (snapped when nearestInfo exists)
-    if (mousePosition) {
-      const drawX = Math.max(0, Math.min(width, (nearestInfo as any)?.x ?? mousePosition.x));
-      ctx.strokeStyle = '#424242';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(drawX + 0.5, 0);
-      ctx.lineTo(drawX + 0.5, height);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
+    // If using uPlot native cursor, skip drawing vertical crosshair and tooltip
+    if (!useUplotNativeCursor) {
+      // Draw vertical crosshair line (snapped when nearestInfo exists)
+      if (mousePosition) {
+        const drawX = Math.max(0, Math.min(width, (nearestInfo as any)?.x ?? mousePosition.x));
+        ctx.strokeStyle = '#424242';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(drawX + 0.5, 0);
+        ctx.lineTo(drawX + 0.5, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
 
-    // Draw simple tooltip if nearestInfo is provided
-    // uPlot 已经处理了垂直线和点的高亮，这里只显示数值 tooltip
-    if (mousePosition && (nearestInfo as any)?.points) {
-      const info = nearestInfo as any;
-      const anchorX = info?.x ?? mousePosition.x;
-      
-      ctx.font = '12px sans-serif';
-      const timeText = `T+${info.time.toFixed(1)}s`;
-      const lines = [timeText, ...info.points.map((p: any) => `${p.series}: ${p.value.toFixed(2)}`)];
+      // Draw simple tooltip if nearestInfo is provided
+      if (mousePosition && (nearestInfo as any)?.points) {
+        const info = nearestInfo as any;
+        const anchorX = info?.x ?? mousePosition.x;
+        
+        ctx.font = '12px sans-serif';
+        const timeText = `T+${info.time.toFixed(1)}s`;
+        const lines = [timeText, ...info.points.map((p: any) => `${p.series}: ${p.value.toFixed(2)}`)];
 
-      const padding = 6;
-      const lineHeight = 16;
-      const minWidth = 64;
-      const maxWidth = Math.max(...lines.map((l: string) => ctx.measureText(l).width));
-      const boxW = Math.max(minWidth, maxWidth + padding * 2);
-      const boxH = lines.length * lineHeight + 6;
+        const padding = 6;
+        const lineHeight = 16;
+        const minWidth = 64;
+        const maxWidth = Math.max(...lines.map((l: string) => ctx.measureText(l).width));
+        const boxW = Math.max(minWidth, maxWidth + padding * 2);
+        const boxH = lines.length * lineHeight + 6;
 
-      // Position tooltip
-      const tooltipY = 6;
-      const tooltipX = Math.max(8, Math.min(width - boxW - 8, anchorX));
+        // Position tooltip
+        const tooltipY = 6;
+        const tooltipX = Math.max(8, Math.min(width - boxW - 8, anchorX));
 
-      // Background
-      ctx.fillStyle = 'rgba(44,62,80,0.95)';
-      ctx.fillRect(tooltipX, tooltipY, boxW, boxH);
+        // Background
+        ctx.fillStyle = 'rgba(44,62,80,0.95)';
+        ctx.fillRect(tooltipX, tooltipY, boxW, boxH);
 
-      // Draw text lines
-      ctx.fillStyle = '#fff';
-      for (let i = 0; i < lines.length; i++) {
-        const txt = lines[i];
-        const lx = tooltipX + padding;
-        const ly = tooltipY + padding + 12 + i * lineHeight;
-        // colored dot for series lines (skip first time line)
-        if (i > 0) {
-          const color = info.points[i - 1].color || '#000';
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.arc(tooltipX + 8, ly - 6, 4, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#fff';
-          ctx.fillText(txt, lx + 14, ly);
-        } else {
-          ctx.fillText(txt, lx, ly);
+        // Draw text lines
+        ctx.fillStyle = '#fff';
+        for (let i = 0; i < lines.length; i++) {
+          const txt = lines[i];
+          const lx = tooltipX + padding;
+          const ly = tooltipY + padding + 12 + i * lineHeight;
+          // colored dot for series lines (skip first time line)
+          if (i > 0) {
+            const color = info.points[i - 1].color || '#000';
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(tooltipX + 8, ly - 6, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.fillText(txt, lx + 14, ly);
+          } else {
+            ctx.fillText(txt, lx, ly);
+          }
         }
       }
     }

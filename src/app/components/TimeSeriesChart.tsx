@@ -129,6 +129,35 @@ export function TimeSeriesChart({
           range: yMin !== null && yMax !== null ? [yMin, yMax] : undefined,
         },
       },
+      // Enable uPlot native cursor and nearest-point highlighting
+      cursor: {
+        show: true,
+        x: true,
+        y: false,
+        lock: false,
+        points: {
+          show: (u, sidx, idx) => typeof idx === 'number' && idx >= 0,
+          size: 6,
+          stroke: '#ffffff',
+        },
+      },
+      hooks: {
+        setCursor: [
+          (u: uPlot) => {
+            try {
+              const idx = (u.cursor && (u.cursor.idx as number | null)) ?? null;
+              if (typeof idx === 'number' && idx >= 0) {
+                const time = (u.data[0] as number[])[idx];
+                onSharedMouseMove?.(Math.round(time * 10) / 10);
+              } else {
+                onSharedMouseMove?.(null);
+              }
+            } catch (e) {
+              // ignore
+            }
+          },
+        ],
+      },
       axes: [
         {
           stroke: '#BDBDBD',
@@ -436,12 +465,11 @@ export function TimeSeriesChart({
         />
 
         {/* 左上角通道名称（工业风格） */}
-        <div className="absolute top-2 left-2 pointer-events-none">
-          <span className="text-4xl font-bold text-[#BDBDBD] opacity-25">
+        <div className="absolute top-0 pointer-events-none" style={{ left: '50px' }}>
+          <span className="text-4xl font-bold text-[#0E0E0E] opacity-25">
             {channel.toUpperCase()}
           </span>
         </div>
-
         {/* 右上角图例 */}
         <div className="absolute top-2 right-2 flex gap-3 pointer-events-none">
           <div className="flex items-center gap-1">
@@ -476,6 +504,7 @@ export function TimeSeriesChart({
           onMouseUp={handleCanvasMouseUp}
           onMouseLeave={handleCanvasMouseLeave}
           cursor={getCursorStyle()}
+          useUplotNativeCursor={false}
         />
 
         {/* Canvas Tooltip in OverlayCanvas handles time and series values */}

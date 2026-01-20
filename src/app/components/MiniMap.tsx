@@ -58,6 +58,10 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
   const axisHeight = 20; // px reserved inside minimap for x-axis labels
 
   const uplotOptions = useMemo((): uPlot.Options => {
+    // ensure the minimap spans the full timeline: include totalDuration
+    const fullMin = Math.min(dataMin, 0);
+    const fullMax = Math.max(dataMax, totalDuration);
+
     return {
       width: dimensions.width,
       // make uPlot use the full available height minus our internal axis band
@@ -65,7 +69,7 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
       scales: {
         x: {
           time: false,
-          range: [dataMin, dataMax],  // 使用数据的实际时间范围
+          range: [fullMin, fullMax],  // 使用包含 totalDuration 的完整时间范围
         },
       },
       // hide uPlot's built-in x-axis so we can render labels inside the box
@@ -84,7 +88,7 @@ export function MiniMap({ data, totalDuration, viewport, onViewportChange, annot
       cursor: { show: false },
       legend: { show: false },
     };
-  }, [dimensions, totalDuration]);
+  }, [dimensions, dataMin, dataMax, totalDuration]);
 
   const { containerRef: uplotContainerRef } = useUplot(uplotData, uplotOptions, [dataMin, dataMax]);
   // 计算百分比位置的辅助函数（确保对齐）
