@@ -119,6 +119,7 @@ export function TimeSeriesChart({
     return {
       width: dimensions.width,
       height: dimensions.height,
+      padding: [10, 0, 10, 0],
       scales: {
         x: {
           time: false,
@@ -143,12 +144,12 @@ export function TimeSeriesChart({
         },
       ],
       series: [
-        {},
+        {}, // x-axis series
         {
           label: `${channel.toUpperCase()}-X`,
           stroke: colors[channel].x,
           width: 1.5,  // 细线条
-          points: { show: false },
+          points: { show: false },  // 静态点不显示
         },
         {
           label: `${channel.toUpperCase()}-Y`,
@@ -164,7 +165,11 @@ export function TimeSeriesChart({
         },
       ],
       cursor: {
+        show: false,
         drag: { x: false, y: false },
+        x: false,
+        y: false,
+        lock: false,
         points: { show: false },
       },
       legend: { show: false },
@@ -177,115 +182,57 @@ export function TimeSeriesChart({
     [viewport, channel, yAxisDomain]
   );
 
-  // Compute nearest points for crosshair tooltip using uPlot API when possible
-  // Accept mouseLeft (CSS pixels relative to plotting area)
+  // 简化版：使用 uPlot 的 posToIdx 直接获取最近点
+  // uPlot 已经在内部处理点的高亮，这里只用于自定义 tooltip
   const computeNearestPoints = (mouseLeft: number | null) => {
     if (mouseLeft === null) return null;
-    const plot = plotRef.current as any;
+    const plot = plotRef.current;
+    if (!plot) return null;
+
     const times = uplotData[0] as number[];
     if (!times || times.length === 0) return null;
 
-    // device pixel ratio
-    const dpr = window.devicePixelRatio || 1;
-
-    // Try to use uPlot APIs with canvas-pixel coordinates, then convert back to CSS pixels
     try {
-      if (plot && typeof plot.posToIdx === 'function' && typeof plot.valToPos === 'function') {
-        // uPlot's bbox values are in canvas pixels. Convert our mouse (CSS px)
-        // into canvas px and query uPlot, then convert returned canvas px back
-        // into CSS px for our overlay drawing (we draw in CSS pixels via ctx.scale(dpr,dpr)).
-        const bbox = plot.bbox || { left: 0, top: 0 };
+      // 直接使用 uPlot 的 posToIdx 获取最近索引
+      const idx = plot.posToIdx(mouseLeft);
+      if (idx == null || idx < 0 || idx >= times.length) return null;
 
-        // CSS -> canvas px
-        const canvasX = mouseLeft * dpr + (bbox.left || 0);
+      const time = times[idx];
+      const xs = uplotData[1] as number[];
+      const ys = uplotData[2] as number[];
+      const zs = uplotData[3] as number[];
 
-        // nearest index
-        let idx = plot.posToIdx(canvasX, /*canvasPixels=*/true);
-        if (idx === null || idx === undefined) {
-          const timeAt = pixelToTime(mouseLeft, viewport.start, viewport.end, dimensions.width);
-          let lo = 0;
-          let hi = times.length - 1;
-          while (lo < hi) {
-            const mid = Math.floor((lo + hi) / 2);
-            if (times[mid] < timeAt) lo = mid + 1;
-            else hi = mid;
-          }
-          idx = lo;
-          if (idx > 0 && Math.abs(times[idx - 1] - timeAt) <= Math.abs(times[idx] - timeAt)) idx = idx - 1;
-        }
+      // 使用 uPlot 的 valToPos 确保 100% 对齐
+      const x = plot.valToPos(time, 'x');
+      
+      const pts = [
+        {
+          series: 'X',
+          value: xs[idx],
+          x,
+          y: plot.valToPos(xs[idx], 'y'),
+          color: colors[channel].x,
+        },
+        {
+          series: 'Y',
+          value: ys[idx],
+          x,
+          y: plot.valToPos(ys[idx], 'y'),
+          color: colors[channel].y,
+        },
+        {
+          series: 'Z',
+          value: zs[idx],
+          x,
+          y: plot.valToPos(zs[idx], 'y'),
+          color: colors[channel].z,
+        },
+      ];
 
-        if (idx === null || idx === undefined) return null;
-
-        const xs = uplotData[1] as number[];
-        const ys = uplotData[2] as number[];
-        const zs = uplotData[3] as number[];
-
-        const seriesMeta = plot.series || [];
-        const resolveScale = (seriesIdx: number) => {
-          const meta = seriesMeta[seriesIdx];
-          return (meta && meta.scale) || 'y';
-        };
-
-        // ask uPlot for canvas-pixel positions
-        const timeCanvasPx = plot.valToPos(times[idx], /*scaleKey=*/'x', /*canvasPixels=*/true);
-        const xCanvas = plot.valToPos(xs[idx], resolveScale(1), /*canvasPixels=*/true);
-        const yCanvas = plot.valToPos(ys[idx], resolveScale(2), /*canvasPixels=*/true);
-        const zCanvas = plot.valToPos(zs[idx], resolveScale(3), /*canvasPixels=*/true);
-
-        // canvas px -> CSS px for our overlay
-        const cssX = (timeCanvasPx - (bbox.left || 0)) / dpr;
-        const pxX = (xCanvas - (bbox.left || 0)) / dpr;
-        const pxY = (yCanvas - (bbox.top || 0)) / dpr;
-        const pxZ = (zCanvas - (bbox.top || 0)) / dpr;
-
-        const pts = [
-          { series: 'X', value: xs[idx], x: cssX, y: pxX, color: colors[channel].x },
-          { series: 'Y', value: ys[idx], x: cssX, y: pxY, color: colors[channel].y },
-          { series: 'Z', value: zs[idx], x: cssX, y: pxZ, color: colors[channel].z },
-        ];
-
-        return { idx, time: times[idx], points: pts };
-      }
+      return { idx, time, x, points: pts };
     } catch (err) {
-      // fall through to manual mapping
+      return null;
     }
-
-    // Manual fallback
-    const xs = uplotData[1] as number[];
-    const ys = uplotData[2] as number[];
-    const zs = uplotData[3] as number[];
-    const timeAt = pixelToTime(mouseLeft, viewport.start, viewport.end, dimensions.width);
-    let lo = 0;
-    let hi = times.length - 1;
-    while (lo < hi) {
-      const mid = Math.floor((lo + hi) / 2);
-      if (times[mid] < timeAt) lo = mid + 1;
-      else hi = mid;
-    }
-    let idx = lo;
-    if (idx > 0 && Math.abs(times[idx - 1] - timeAt) <= Math.abs(times[idx] - timeAt)) idx = idx - 1;
-
-    const values = [...xs, ...ys, ...zs];
-    let yMin = Math.min(...values);
-    let yMax = Math.max(...values);
-    if (yMin === yMax) {
-      yMin -= 1;
-      yMax += 1;
-    }
-
-    const x = timeToPixel(times[idx], viewport.start, viewport.end, dimensions.width);
-    const valueToPixel = (v: number) => {
-      const ratio = (v - yMin) / (yMax - yMin);
-      return dimensions.height - ratio * dimensions.height;
-    };
-
-    const pts = [
-      { series: 'X', value: xs[idx], x, y: valueToPixel(xs[idx]), color: colors[channel].x },
-      { series: 'Y', value: ys[idx], x, y: valueToPixel(ys[idx]), color: colors[channel].y },
-      { series: 'Z', value: zs[idx], x, y: valueToPixel(zs[idx]), color: colors[channel].z },
-    ];
-
-    return { idx, time: times[idx], points: pts };
   };
 
   // Get cursor style based on tool mode and hover state
@@ -458,10 +405,11 @@ export function TimeSeriesChart({
         }
       : null;
 
-  const nearestInfo = computeNearestPoints(
-    // prefer local mouse x, else shared mouse x
-    mousePosition?.x ?? sharedMousePosition?.x ?? null
-  );
+  const activeMouseX = mousePosition?.x ?? sharedMousePosition?.x ?? null;
+  const nearestInfo = computeNearestPoints(activeMouseX);
+  const overlayMousePosition = nearestInfo
+    ? { x: nearestInfo.x, time: nearestInfo.time }
+    : mousePosition ?? sharedMousePosition ?? null;
 
   return (
     <div
@@ -478,7 +426,14 @@ export function TimeSeriesChart({
         onMouseLeave={() => setIsHovering(false)}
       >
         {/* uPlot chart */}
-        <div ref={uplotContainerRef} />
+        <div 
+          ref={uplotContainerRef} 
+          style={{ 
+            width: `${dimensions.width}px`, 
+            height: `${dimensions.height}px`,
+            position: 'relative'
+          }} 
+        />
 
         {/* 左上角通道名称（工业风格） */}
         <div className="absolute top-2 left-2 pointer-events-none">
@@ -513,7 +468,7 @@ export function TimeSeriesChart({
           selectedRegionId={selectedRegionId}
           dragSelection={dragSelection}
           // mousePosition prefers local mouse over shared position
-          mousePosition={mousePosition ?? sharedMousePosition}
+          mousePosition={overlayMousePosition}
           // nearest point info for crosshair tooltip/markers
           nearestInfo={nearestInfo}
           onMouseDown={handleCanvasMouseDown}
@@ -521,22 +476,9 @@ export function TimeSeriesChart({
           onMouseUp={handleCanvasMouseUp}
           onMouseLeave={handleCanvasMouseLeave}
           cursor={getCursorStyle()}
-          showVerticalLines={true}
         />
 
-        {/* Time tooltip - \u8ddf\u968f\u9f20\u6807\u663e\u793a */}
-        {mousePosition !== null && !dragStart && !nearestInfo && (
-          <div
-            className="absolute bg-[#2C3E50] text-white text-xs px-2 py-1 rounded pointer-events-none z-20 shadow-lg"
-            style={{
-              left: `${mousePosition.x + 10}px`,
-              top: '5px',
-              transform: mousePosition.x > dimensions.width - 80 ? 'translateX(-100%)' : 'none',
-            }}
-          >
-            T+{mousePosition.time.toFixed(2)}s
-          </div>
-        )}
+        {/* Canvas Tooltip in OverlayCanvas handles time and series values */}
       </div>
     </div>
   );
