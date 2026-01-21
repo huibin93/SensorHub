@@ -1,0 +1,5 @@
+{
+  "name": "SensorHub Analytics",
+  "description": "Professional sensor data management platform for processing raw wearable device data.",
+  "requestFramePermissions": []
+}

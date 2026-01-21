@@ -1,35 +1,20 @@
-# SensorHub
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+</div>
 
-一个用于可视化和交互式音频/时间序列标注的前端项目（含参考实现和组件）。
+# Run and deploy your AI Studio app
 
-## 概要
-- 代码位置：项目根目录包含前端源码、参考[label-studio](https://github.com/HumanSignal/label-studio)`。
-- 技术栈：TypeScript, React, Vite（以及若干自定义音频/可视化模块）。
+This contains everything you need to run your app locally.
 
-## 快速开始
-1. 安装依赖：
+View your app in AI Studio: https://ai.studio/apps/drive/1p8lbXqwIXvXkpyKUdP304kzTu-7y-kbO
 
-```bash
-npm install
-```
+## Run Locally
 
-2. 本地开发：
-
-```bash
-npm run dev
-```
-
-3. 打包发布：
-
-```bash
-npm run build
-```
-
-## 目录提示
-- `Reference/`：参考实现和组件（音频处理、可视化、标签组件等）。
-- `src/`：应用入口与核心应用代码。
-
-## 许可证
-本项目采用 MIT 许可证，详见仓库根目录的 `LICENSE` 文件。
+**Prerequisites:**  Node.js
 
 
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`
