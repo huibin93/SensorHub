@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Watch, Circle, UploadCloud, FileText, Database, CheckCircle, Clock } from 'lucide-vue-next';
+import { UploadCloud, FileText, Database, CheckCircle, Clock } from 'lucide-vue-next';
 import { MOCK_STATS } from '../constants';
 
 const StatCard = {
@@ -22,34 +22,19 @@ const StatCard = {
           <UploadCloud :size="20" class="text-gray-400" />
           Quick Upload
       </h2>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <!-- Watch Upload -->
-          <button class="group relative flex flex-col items-start p-5 rounded-xl border-2 border-blue-50 bg-blue-50/30 hover:bg-blue-50 hover:border-blue-200 transition-all duration-300 text-left">
-              <div class="flex items-center justify-between w-full mb-3">
-                  <div class="p-3 bg-blue-100 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                      <Watch :size="24" />
-                  </div>
-                  <span class="text-xs font-semibold text-blue-600 bg-blue-100 px-2 py-1 rounded">.rawdata</span>
-              </div>
-              <h3 class="text-lg font-bold text-gray-900">Upload Watch Data</h3>
-              <p class="text-sm text-gray-500 mt-1">Supports Watch Series 5-8, Ultra models</p>
-          </button>
-
-          <!-- Ring Upload -->
-          <button class="group relative flex flex-col items-start p-5 rounded-xl border-2 border-teal-50 bg-teal-50/30 hover:bg-teal-50 hover:border-teal-200 transition-all duration-300 text-left">
-              <div class="flex items-center justify-between w-full mb-3">
-                  <div class="p-3 bg-teal-100 text-teal-600 rounded-lg group-hover:bg-teal-600 group-hover:text-white transition-colors">
-                      <Circle :size="24" />
-                  </div>
-                  <span class="text-xs font-semibold text-teal-600 bg-teal-100 px-2 py-1 rounded">.rawdata</span>
-              </div>
-              <h3 class="text-lg font-bold text-gray-900">Upload Ring Data</h3>
-              <p class="text-sm text-gray-500 mt-1">Supports Smart Ring Pro, Oura Gen 3</p>
-          </button>
-      </div>
-      <div class="mt-4 text-center border border-dashed border-gray-300 rounded-lg py-3 text-sm text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors cursor-pointer bg-gray-50/50">
-          Or drag & drop .rawdata files here (auto-detect device type)
-      </div>
+      
+      <!-- Unified Upload Zone -->
+      <button class="w-full group relative flex flex-col items-center justify-center p-8 rounded-xl border-2 border-dashed border-blue-200 bg-blue-50/30 hover:bg-blue-50 hover:border-blue-400 transition-all duration-300">
+          <div class="p-4 bg-blue-100 text-blue-600 rounded-full mb-3 group-hover:bg-blue-600 group-hover:text-white group-hover:scale-110 transition-all duration-300">
+              <UploadCloud :size="32" />
+          </div>
+          <h3 class="text-lg font-bold text-gray-900 mb-1">Upload Data Files</h3>
+          <p class="text-sm text-gray-500 mb-4">Support .rawdata or .zip files</p>
+          <div class="flex gap-2">
+            <span class="text-xs font-semibold text-blue-600 bg-blue-100 px-3 py-1 rounded-full">.rawdata</span>
+            <span class="text-xs font-semibold text-blue-600 bg-blue-100 px-3 py-1 rounded-full">.zip</span>
+          </div>
+      </button>
     </div>
 
     <!-- Stats Section (Right) -->

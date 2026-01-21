@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { 
   Search, Filter, ChevronDown, Eye, Download, MoreHorizontal, 
-  RotateCw, Play, Zap, Edit2, Watch, Circle 
+  RotateCw, Play, Zap, Edit2, Watch, Circle, Trash2, ChevronLeft, ChevronRight 
 } from 'lucide-vue-next';
 import { SensorFile, FileStatus, DeviceType } from '../types';
 import { MOCK_FILES, MOCK_STATS } from '../constants';
@@ -15,6 +15,7 @@ const data = ref<SensorFile[]>(MOCK_FILES);
 const selectedIds = ref<Set<string>>(new Set());
 const editingId = ref<string | null>(null);
 const editingField = ref<'notes' | 'testType' | null>(null);
+const activeRowMenu = ref<string | null>(null);
 
 const filterDevice = ref<string>('All');
 const filterStatus = ref<string>('All');
@@ -108,66 +109,122 @@ const updateNote = (id: string, event: Event) => {
     data.value = data.value.map(item => item.id === id ? { ...item, notes: val } : item);
 };
 
+// Batch Actions
+const handleBatchDownload = () => {
+    console.log('Downloading files:', Array.from(selectedIds.value));
+    selectedIds.value = new Set();
+};
+
+const handleBatchDelete = () => {
+    const idsToDelete = selectedIds.value;
+    data.value = data.value.filter(item => !idsToDelete.has(item.id));
+    selectedIds.value = new Set();
+};
+
+const deleteRow = (id: string) => {
+    data.value = data.value.filter(item => item.id !== id);
+    activeRowMenu.value = null;
+};
+
+const downloadRow = (id: string) => {
+    console.log('Downloading file:', id);
+    activeRowMenu.value = null;
+};
+
+// Close menu when clicking outside
+const handleClickOutside = (event: MouseEvent) => {
+    if (activeRowMenu.value && !(event.target as Element).closest('.row-menu-container')) {
+        activeRowMenu.value = null;
+    }
+};
+
+onMounted(() => {
+    document.addEventListener('click', handleClickOutside);
+});
+
+onUnmounted(() => {
+    document.removeEventListener('click', handleClickOutside);
+});
+
 </script>
 
 <template>
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col">
     
     <!-- 3.1 Search & Filter Bar -->
-    <div class="p-4 border-b border-gray-200 flex flex-col lg:flex-row gap-4 justify-between items-center bg-gray-50/50 rounded-t-xl">
-      <div class="relative w-full lg:w-96">
-        <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" :size="16" />
-        <input 
-          type="text" 
-          placeholder="Search filename, notes, or ID..." 
-          class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-        />
+    <div class="p-4 border-b border-gray-200 flex flex-col lg:flex-row gap-4 justify-between items-start lg:items-center bg-gray-50/50 rounded-t-xl">
+      
+      <!-- Left Group: Search & Filters -->
+      <div class="flex flex-col md:flex-row items-stretch md:items-center gap-2 w-full lg:w-auto">
+        <!-- Search -->
+        <div class="relative w-full md:w-72">
+            <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" :size="16" />
+            <input 
+            type="text" 
+            placeholder="Search filename, notes, or ID..." 
+            class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            />
+        </div>
+
+        <!-- Filters -->
+        <div class="flex items-center gap-2 overflow-x-auto no-scrollbar">
+            <div class="relative">
+                <select 
+                class="appearance-none pl-3 pr-8 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:border-gray-400 transition-colors"
+                v-model="filterDevice"
+                >
+                <option value="All">Device: All</option>
+                <option value="Watch">Watch</option>
+                <option value="Ring">Ring</option>
+                </select>
+                <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" :size="14" />
+            </div>
+
+            <div class="relative">
+                <select 
+                    class="appearance-none pl-3 pr-8 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:border-gray-400 transition-colors"
+                    v-model="filterStatus"
+                >
+                <option value="All">Status: All</option>
+                <option value="Idle">Idle</option>
+                <option value="Ready">Ready</option>
+                <option value="Processing">Processing</option>
+                <option value="Failed">Failed</option>
+                </select>
+                <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" :size="14" />
+            </div>
+            
+            <button class="flex items-center gap-1.5 px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors whitespace-nowrap">
+                <Filter :size="16" /> Filters
+            </button>
+        </div>
       </div>
       
-      <div class="flex items-center gap-2 w-full lg:w-auto overflow-x-auto pb-2 lg:pb-0 no-scrollbar">
-        
+      <!-- Right Group: Batch Actions -->
+      <div class="flex items-center gap-2 w-full lg:w-auto justify-end overflow-x-auto no-scrollbar">
         <div v-if="selectedIds.size > 0" class="flex items-center gap-2 animate-in fade-in duration-200">
-            <span class="text-sm font-medium text-gray-600 bg-gray-100 px-3 py-2 rounded-lg">
+            <span class="text-sm font-medium text-gray-600 bg-gray-100 px-3 py-2 rounded-lg whitespace-nowrap">
                 {{ selectedIds.size }} Selected
             </span>
             <button 
                 @click="triggerParse(Array.from(selectedIds))"
-                class="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                class="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm whitespace-nowrap"
             >
-                <Zap :size="16" /> Parse Selected
+                <Zap :size="16" /> Parse
             </button>
-            <div class="h-6 w-px bg-gray-300 mx-1"></div>
-        </div>
-
-        <div class="relative">
-            <select 
-            class="appearance-none pl-3 pr-8 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:border-gray-400 transition-colors"
-            v-model="filterDevice"
+            <button 
+                @click="handleBatchDownload"
+                class="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm whitespace-nowrap"
             >
-            <option value="All">Device: All</option>
-            <option value="Watch">Watch</option>
-            <option value="Ring">Ring</option>
-            </select>
-            <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" :size="14" />
-        </div>
-
-        <div class="relative">
-            <select 
-                class="appearance-none pl-3 pr-8 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:border-gray-400 transition-colors"
-                v-model="filterStatus"
+                <Download :size="16" /> Download
+            </button>
+            <button 
+                @click="handleBatchDelete"
+                class="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 hover:border-red-200 transition-colors shadow-sm whitespace-nowrap"
             >
-            <option value="All">Status: All</option>
-            <option value="Idle">Idle</option>
-            <option value="Ready">Ready</option>
-            <option value="Processing">Processing</option>
-            <option value="Failed">Failed</option>
-            </select>
-            <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" :size="14" />
+                <Trash2 :size="16" /> Delete
+            </button>
         </div>
-        
-        <button class="flex items-center gap-1.5 px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors ml-auto lg:ml-0">
-        <Filter :size="16" /> Filters
-        </button>
       </div>
     </div>
 
@@ -266,9 +323,9 @@ const updateNote = (id: string, event: Event) => {
                 </div>
             </td>
             <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
-                <div class="flex items-center justify-end gap-2">
+                <div class="flex items-center justify-end gap-2 relative row-menu-container">
                 
-                <!-- Action Buttons based on status -->
+                <!-- 1. Start / Retry Buttons (Mutually Exclusive) -->
                 <button 
                     v-if="row.status === FileStatus.Idle"
                     @click="triggerParse([row.id])"
@@ -277,7 +334,16 @@ const updateNote = (id: string, event: Event) => {
                 >
                     <Play :size="18" />
                 </button>
+                 <button 
+                    v-if="row.status === FileStatus.Failed"
+                    @click="triggerParse([row.id])"
+                    class="p-1.5 rounded hover:bg-gray-100 text-orange-600 transition-colors" 
+                    title="Retry"
+                >
+                        <RotateCw :size="18" />
+                </button>
 
+                <!-- 2. Analyze Button -->
                 <button 
                     class="p-1.5 rounded hover:bg-gray-100 transition-colors"
                     :class="row.status === FileStatus.Ready ? 'text-blue-600' : 'text-gray-300 cursor-not-allowed'"
@@ -286,23 +352,35 @@ const updateNote = (id: string, event: Event) => {
                 >
                     <Eye :size="18" />
                 </button>
-                <button 
-                    class="p-1.5 rounded hover:bg-gray-100 text-gray-600 transition-colors"
-                    title="Download Raw Data"
-                >
-                    <Download :size="18" />
-                </button>
-                <button 
-                    v-if="row.status === FileStatus.Failed"
-                    @click="triggerParse([row.id])"
-                    class="p-1.5 rounded hover:bg-gray-100 text-orange-600 transition-colors" 
-                    title="Retry"
-                >
-                        <RotateCw :size="18" />
-                </button>
-                <button class="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
-                    <MoreHorizontal :size="18" />
-                </button>
+
+                <!-- 3. More Actions Menu -->
+                <div class="relative">
+                    <button 
+                        class="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                        @click.stop="activeRowMenu = activeRowMenu === row.id ? null : row.id"
+                    >
+                        <MoreHorizontal :size="18" />
+                    </button>
+                    <!-- Dropdown Menu -->
+                    <div 
+                        v-if="activeRowMenu === row.id" 
+                        class="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-xl z-50 flex flex-col py-1"
+                    >
+                        <button 
+                            @click="downloadRow(row.id)"
+                            class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                        >
+                            <Download :size="16" /> Download
+                        </button>
+                        <button 
+                            @click="deleteRow(row.id)"
+                            class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                        >
+                            <Trash2 :size="16" /> Delete
+                        </button>
+                    </div>
+                </div>
+
                 </div>
             </td>
           </tr>
@@ -311,18 +389,40 @@ const updateNote = (id: string, event: Event) => {
     </div>
 
     <!-- 3.3 Footer -->
-    <div class="p-4 border-t border-gray-200 flex items-center justify-between bg-gray-50 rounded-b-xl text-sm text-gray-600">
-        <div class="flex items-center gap-2">
-        <span>Showing 1 to {{ data.length }} of {{ MOCK_STATS.totalFiles }} items</span>
+    <div class="px-6 py-4 border-t border-gray-200 flex flex-col md:flex-row items-center justify-between gap-4 bg-white rounded-b-xl text-sm text-gray-600">
+        
+        <!-- Left: Items per page & Total count -->
+        <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2">
+                <span class="text-gray-600">Show</span>
+                <div class="relative">
+                    <select class="appearance-none bg-white border border-gray-300 text-gray-700 py-1 pl-3 pr-8 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
+                        <option>20 items</option>
+                        <option>50 items</option>
+                        <option>100 items</option>
+                    </select>
+                    <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" :size="14" />
+                </div>
+            </div>
+            
+            <span class="text-gray-500">Total {{ MOCK_STATS.totalFiles }} items</span>
         </div>
-        <div class="flex items-center gap-2">
-            <button class="px-3 py-1 border border-gray-300 rounded hover:bg-white disabled:opacity-50" disabled>Previous</button>
-            <button class="px-3 py-1 bg-blue-600 text-white rounded shadow-sm">1</button>
-            <button class="px-3 py-1 border border-gray-300 rounded hover:bg-white">2</button>
-            <button class="px-3 py-1 border border-gray-300 rounded hover:bg-white">3</button>
-            <span class="text-gray-400">...</span>
-            <button class="px-3 py-1 border border-gray-300 rounded hover:bg-white">50</button>
-            <button class="px-3 py-1 border border-gray-300 rounded hover:bg-white">Next</button>
+
+        <!-- Right: Pagination -->
+        <div class="flex items-center gap-1">
+            <button class="p-1 rounded hover:bg-gray-100 text-gray-400 disabled:opacity-30 transition-colors" disabled>
+                <ChevronLeft :size="18" />
+            </button>
+            
+            <button class="min-w-[32px] h-8 flex items-center justify-center rounded bg-blue-50 text-blue-600 font-medium border border-blue-100">1</button>
+            <button class="min-w-[32px] h-8 flex items-center justify-center rounded hover:bg-gray-50 text-gray-600 transition-colors">2</button>
+            <button class="min-w-[32px] h-8 flex items-center justify-center rounded hover:bg-gray-50 text-gray-600 transition-colors">3</button>
+            <span class="px-2 text-gray-400">...</span>
+            <button class="min-w-[32px] h-8 flex items-center justify-center rounded hover:bg-gray-50 text-gray-600 transition-colors">50</button>
+
+            <button class="p-1 rounded hover:bg-gray-100 text-gray-600 transition-colors">
+                <ChevronRight :size="18" />
+            </button>
         </div>
     </div>
   </div>

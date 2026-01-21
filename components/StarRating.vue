@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineProps<{
-  value: number;
+  modelValue: number;
 }>();
 
 const emit = defineEmits<{
@@ -19,7 +19,7 @@ const updateValue = (star: number) => {
       :key="star"
       @click.stop="updateValue(star)"
       class="text-sm focus:outline-none hover:scale-110 transition-transform"
-      :class="star <= value ? 'text-yellow-400' : 'text-gray-200'"
+      :class="star <= modelValue ? 'text-yellow-400' : 'text-gray-200'"
       type="button"
     >
       ★

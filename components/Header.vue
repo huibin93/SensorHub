@@ -8,20 +8,7 @@ import { Search, Bell } from 'lucide-vue-next';
     <div class="flex items-center gap-3">
       <!-- Custom SVG Logo -->
       <div class="w-8 h-8 flex items-center justify-center">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
-          <!-- Center Bar - Teal -->
-          <rect x="10" y="3" width="4" height="18" rx="2" class="fill-teal-500" />
-          
-          <!-- Left Bar - Dark Blue -->
-          <rect x="4" y="9" width="3" height="6" rx="1.5" class="fill-blue-700" />
-          <circle cx="5.5" cy="5" r="1.5" class="fill-blue-700" />
-          <circle cx="5.5" cy="19" r="1.5" class="fill-blue-700" />
-
-          <!-- Right Bar - Dark Blue -->
-          <rect x="17" y="9" width="3" height="6" rx="1.5" class="fill-blue-700" />
-          <circle cx="18.5" cy="5" r="1.5" class="fill-blue-700" />
-          <circle cx="18.5" cy="19" r="1.5" class="fill-blue-700" />
-        </svg>
+        <img src="/logo.svg" alt="SensorHub Logo" class="w-full h-full object-contain" />
       </div>
       <span class="text-xl text-gray-800 tracking-tight flex gap-1.5 items-baseline">
         <span class="font-semibold">SensorHub</span>
