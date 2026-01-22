@@ -27,7 +27,8 @@ export interface SensorFile {
   deviceModel: string;
   testTypeL1: string; // e.g., "Walking"
   testTypeL2: string; // e.g., "Outdoor"
-  rating: number; // 0 to 5
+  progress?: number; // 0-100 for processing progress
+
   notes: string;
   uploadTime: string; // ISO string
   packets: PacketInfo[];

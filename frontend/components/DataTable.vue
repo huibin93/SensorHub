@@ -7,9 +7,14 @@ import {
 import { SensorFile, FileStatus, DeviceType } from '../types';
 import { MOCK_FILES, MOCK_STATS } from '../constants';
 import StatusBadge from './StatusBadge.vue';
-import StarRating from './StarRating.vue';
-import PacketPopover from './PacketPopover.vue';
-import TestTypeEditor from './TestTypeEditor.vue';
+
+
+
+
+
+import EditableTestTypeCell from './EditableTestTypeCell.vue';
+import EditableNoteCell from './EditableNoteCell.vue';
+import EditableDeviceCell from './EditableDeviceCell.vue';
 
 const data = ref<SensorFile[]>(MOCK_FILES);
 const selectedIds = ref<Set<string>>(new Set());
@@ -49,65 +54,82 @@ const handleSelectRow = (id: string) => {
 
 const updateField = (id: string, field: keyof SensorFile, value: any) => {
   data.value = data.value.map(item => item.id === id ? { ...item, [field]: value } : item);
-  if (field !== 'notes' && field !== 'rating') {
-      // Notes and rating might allow staying in edit mode or not? 
-      // Original logic: setEditingId(null) for all updates in updateField helper
+  if (field !== 'notes') {
       editingId.value = null;
       editingField.value = null;
   }
 };
 
 const updateTestType = (id: string, l1: string, l2: string) => {
+     console.log('[DataTable] updateTestType called', { id, l1, l2 });
      data.value = data.value.map(item => item.id === id ? { ...item, testTypeL1: l1, testTypeL2: l2 } : item);
      editingId.value = null;
      editingField.value = null;
+     console.log('[DataTable] Test type updated successfully');
+};
+
+const updateNote = (id: string, note: string) => {
+     console.log('[DataTable] updateNote called', { id, note });
+     data.value = data.value.map(item => item.id === id ? { ...item, notes: note } : item);
+     console.log('[DataTable] Note updated successfully');
+};
+
+const updateDevice = (id: string, deviceType: DeviceType, deviceModel: string) => {
+     console.log('[DataTable] updateDevice called', { id, deviceType, deviceModel });
+     data.value = data.value.map(item => item.id === id ? { ...item, deviceType, deviceModel } : item);
+     console.log('[DataTable] Device updated successfully');
 };
 
 const triggerParse = (ids: string[]) => {
-    // Optimistically update status
-    data.value = data.value.map(item => ids.includes(item.id) ? { ...item, status: FileStatus.Processing } : item);
-    
-    setTimeout(() => {
-        data.value = data.value.map(item => {
-            if (ids.includes(item.id)) {
-                return {
-                    ...item,
-                    status: FileStatus.Ready,
-                    packets: item.packets.length > 0 ? item.packets : [
-                        { name: 'ACC', freq: '100Hz', count: 10000, present: true },
-                        { name: 'PPG', freq: '25Hz', count: 2500, present: true }
-                    ],
-                    duration: item.duration === '--' ? '00:10:00' : item.duration
-                };
-            }
-            return item;
-        });
-    }, 2000);
+    // 1. Optimistically update status to Processing and init progress
+    data.value = data.value.map(item => ids.includes(item.id) ? { ...item, status: FileStatus.Processing, progress: 0 } : item);
 
     if (ids.length > 1) selectedIds.value = new Set();
+
+    // 2. Start Mock Progress Interval
+    const interval = setInterval(() => {
+        let anyProcessing = false;
+
+        data.value = data.value.map(item => {
+             if (ids.includes(item.id) && item.status === FileStatus.Processing) {
+                 const newP = (item.progress || 0) + 10; // Increment
+                 
+                 // If complete
+                 if (newP >= 100) {
+                     return {
+                        ...item,
+                        status: FileStatus.Ready,
+                        progress: undefined,
+                         packets: item.packets.length > 0 ? item.packets : [
+                            { name: 'ACC', freq: '100Hz', count: 10000, present: true },
+                            { name: 'PPG', freq: '25Hz', count: 2500, present: true }
+                        ],
+                        duration: item.duration === '--' ? '00:10:00' : item.duration
+                     };
+                 }
+                 
+                 anyProcessing = true;
+                 return { ...item, progress: newP };
+             }
+             return item;
+        });
+        
+        // Stop if no relevant items are still processing
+        // (This simple check might stop too early if something else sets it to processing, strict check is ids.includes)
+        // But for this mock it's fine.
+        const stillRunning = data.value.some(i => ids.includes(i.id) && i.status === FileStatus.Processing);
+        if (!stillRunning) {
+            clearInterval(interval);
+        }
+    }, 200); // Fast updates for demo
 };
 
-const startEditing = (id: string, field: 'notes' | 'testType') => {
+const startEditing = (id: string, field: 'testType') => {
     editingId.value = id;
     editingField.value = field;
 };
 
-const updateNote = (id: string, event: Event) => {
-    const val = (event.target as HTMLInputElement).value;
-    // We don't close edit mode for notes as user might be typing? 
-    // Original: onChange updated state. 
-    // Since we are using local state for `data`, we can just update it.
-    // But `updateField` closes edit mode. 
-    // Wait, original: `onChange={(e) => updateField(row.id, 'notes', e.target.value)}`
-    // And `updateField` calls `setEditingId(null)`. 
-    // This means typing one character would close the input if it was conditional?
-    // Actually the input for notes is ALWAYS visible in the original: 
-    // `<input ... value={row.notes} onChange=... />`
-    // It wasn't conditional on `editingId`. 
-    // The `Edit2` icon was conditional or just visual.
-    // So for notes, I will just update directly without closing "edit mode" because there isn't one for notes.
-    data.value = data.value.map(item => item.id === id ? { ...item, notes: val } : item);
-};
+
 
 // Batch Actions
 const handleBatchDownload = () => {
@@ -152,17 +174,18 @@ onUnmounted(() => {
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col">
     
     <!-- 3.1 Search & Filter Bar -->
-    <div class="p-4 border-b border-gray-200 flex flex-col lg:flex-row gap-4 justify-between items-start lg:items-center bg-gray-50/50 rounded-t-xl">
+    <!-- 3.1 Search & Filter Bar -->
+    <div class="p-4 border-b border-slate-100 flex flex-col lg:flex-row gap-4 justify-between items-start lg:items-center bg-white rounded-t-xl">
       
       <!-- Left Group: Search & Filters -->
       <div class="flex flex-col md:flex-row items-stretch md:items-center gap-2 w-full lg:w-auto">
         <!-- Search -->
-        <div class="relative w-full md:w-72">
-            <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" :size="16" />
+        <div class="relative w-full md:w-80 lg:w-96">
+            <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" :size="16" />
             <input 
             type="text" 
             placeholder="Search filename, notes, or ID..." 
-            class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            class="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none placeholder-slate-400 bg-white shadow-sm transition-all"
             />
         </div>
 
@@ -170,19 +193,19 @@ onUnmounted(() => {
         <div class="flex items-center gap-2 overflow-x-auto no-scrollbar">
             <div class="relative">
                 <select 
-                class="appearance-none pl-3 pr-8 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:border-gray-400 transition-colors"
+                class="appearance-none pl-3 pr-8 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:border-slate-300 transition-colors shadow-sm text-slate-600 font-medium"
                 v-model="filterDevice"
                 >
                 <option value="All">Device: All</option>
                 <option value="Watch">Watch</option>
                 <option value="Ring">Ring</option>
                 </select>
-                <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" :size="14" />
+                <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" :size="14" />
             </div>
 
             <div class="relative">
                 <select 
-                    class="appearance-none pl-3 pr-8 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:border-gray-400 transition-colors"
+                    class="appearance-none pl-3 pr-8 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:border-slate-300 transition-colors shadow-sm text-slate-600 font-medium"
                     v-model="filterStatus"
                 >
                 <option value="All">Status: All</option>
@@ -191,10 +214,10 @@ onUnmounted(() => {
                 <option value="Processing">Processing</option>
                 <option value="Failed">Failed</option>
                 </select>
-                <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" :size="14" />
+                <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" :size="14" />
             </div>
             
-            <button class="flex items-center gap-1.5 px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors whitespace-nowrap">
+            <button class="flex items-center gap-1.5 px-3 py-2 bg-transparent text-slate-500 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors whitespace-nowrap">
                 <Filter :size="16" /> Filters
             </button>
         </div>
@@ -233,22 +256,22 @@ onUnmounted(() => {
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
-            <th scope="col" class="px-4 py-3 text-left w-12">
+            <th scope="col" class="px-4 py-3 text-left w-12 bg-slate-50/50">
               <input 
                   type="checkbox" 
-                  class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   @change="handleSelectAll"
                   :checked="data.length > 0 && selectedIds.size === data.length"
               />
             </th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">File Info</th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Device</th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Data Content</th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Test Type</th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Rating</th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[200px]">Notes</th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Actions</th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50">Status</th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50">File Name</th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50">File Info</th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50">Device</th>
+
+            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50">Test Type</th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider min-w-[200px] bg-slate-50/50">Notes</th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider text-right bg-slate-50/50">Actions</th>
           </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
@@ -267,86 +290,71 @@ onUnmounted(() => {
                 <StatusBadge :status="row.status" :error="row.errorMessage" />
             </td>
             <td class="px-4 py-3">
-                <div class="flex flex-col">
-                <span class="text-sm font-medium text-gray-900">{{ row.filename }}</span>
-                <span class="text-xs text-gray-400 font-mono">ID: {{ row.id }}</span>
-                <span class="text-xs text-gray-400">{{ new Date(row.uploadTime).toLocaleDateString() }}</span>
-                </div>
+                <span class="text-sm font-bold text-slate-800">{{ row.filename }}</span>
             </td>
             <td class="px-4 py-3 whitespace-nowrap">
                 <div class="flex flex-col">
-                <div class="flex items-center gap-1.5">
-                    <Watch v-if="row.deviceType === DeviceType.Watch" :size="14" class="text-blue-500" />
-                    <Circle v-else :size="14" class="text-teal-500" />
-                    <span class="text-sm text-gray-700">{{ row.deviceModel }}</span>
-                </div>
-                <span class="text-xs text-gray-400">{{ row.duration }} • {{ row.size }}</span>
+                    <span class="text-sm text-slate-700 font-medium">{{ new Date(row.uploadTime).toLocaleString() }}</span>
+                    <span class="text-xs text-slate-500">{{ row.duration }} • {{ row.size }}</span>
                 </div>
             </td>
             <td class="px-4 py-3 whitespace-nowrap">
-                <PacketPopover :packets="row.packets" />
-            </td>
-            <td class="px-4 py-3 whitespace-nowrap relative">
-                <!-- Test Type Editable -->
-                <div 
-                    class="cursor-pointer group flex items-center gap-1"
-                    @click="startEditing(row.id, 'testType')"
-                >
-                        <div class="flex flex-col">
-                        <span class="text-sm font-medium text-gray-800">{{ row.testTypeL1 }}</span>
-                        <span class="text-xs text-gray-500">{{ row.testTypeL2 }}</span>
-                        </div>
-                        <Edit2 :size="10" class="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-                <!-- Inline Editor -->
-                <TestTypeEditor 
-                    v-if="editingId === row.id && editingField === 'testType'"
-                    :file="row"
-                    @update="updateTestType"
-                    @close="editingId = null; editingField = null;" 
+                <EditableDeviceCell 
+                    :initialDeviceType="row.deviceType"
+                    :initialDeviceModel="row.deviceModel"
+                    :fileId="row.id"
+                    @update="updateDevice"
                 />
             </td>
-            <td class="px-4 py-3 whitespace-nowrap">
-                <StarRating :modelValue="row.rating" @update:modelValue="(v: number) => updateField(row.id, 'rating', v)" />
+
+            <td class="px-4 py-3 whitespace-nowrap relative">
+                <EditableTestTypeCell 
+                    :initialL1="row.testTypeL1"
+                    :initialL2="row.testTypeL2"
+                    :fileId="row.id"
+                    @update="updateTestType"
+                />
             </td>
             <td class="px-4 py-3">
-                <!-- Inline Note Editing -->
-                <div class="relative group">
-                <input
-                    type="text"
-                    class="w-full bg-transparent border-b border-transparent focus:border-blue-500 focus:bg-white text-sm text-gray-600 focus:text-gray-900 outline-none transition-all placeholder-gray-300 truncate"
-                    :value="row.notes"
-                    @input="(e) => updateNote(row.id, e)"
-                    placeholder="Add a note..."
+                <EditableNoteCell 
+                    :initialNote="row.notes"
+                    :fileId="row.id"
+                    @update="updateNote"
                 />
-                <Edit2 :size="12" class="absolute right-0 top-1/2 -translate-y-1/2 text-gray-300 opacity-0 group-hover:opacity-100 pointer-events-none" />
-                </div>
             </td>
+
+
             <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                 <div class="flex items-center justify-end gap-2 relative row-menu-container">
                 
-                <!-- 1. Start / Retry Buttons (Mutually Exclusive) -->
-                <button 
-                    v-if="row.status === FileStatus.Idle"
-                    @click="triggerParse([row.id])"
-                    class="p-1.5 rounded hover:bg-green-50 text-green-600 transition-colors" 
-                    title="Start Parsing"
-                >
-                    <Play :size="18" />
-                </button>
-                 <button 
-                    v-if="row.status === FileStatus.Failed"
-                    @click="triggerParse([row.id])"
-                    class="p-1.5 rounded hover:bg-gray-100 text-orange-600 transition-colors" 
-                    title="Retry"
-                >
-                        <RotateCw :size="18" />
-                </button>
+                <!-- 1. Start / Retry / Progress -->
+                <div v-if="row.status === FileStatus.Processing" class="px-1.5 py-1 text-xs font-semibold text-blue-500 min-w-[32px] text-center bg-blue-50 rounded">
+                    {{ row.progress || 0 }}%
+                </div>
+                <template v-else>
+                    <button 
+                        v-if="row.status === FileStatus.Idle"
+                        @click="triggerParse([row.id])"
+                        class="p-1.5 rounded hover:bg-green-50 text-slate-400 hover:text-green-700 transition-colors" 
+                        title="Start Parsing"
+                    >
+                        <Play :size="18" />
+                    </button>
+                    <button 
+                        v-if="row.status === FileStatus.Failed || row.status === FileStatus.Ready"
+                        @click="triggerParse([row.id])"
+                        class="p-1.5 rounded transition-colors"
+                        :class="row.status === FileStatus.Ready ? 'hover:bg-blue-50 text-blue-400 hover:text-blue-600' : 'hover:bg-orange-50 text-orange-400 hover:text-orange-600'" 
+                        :title="row.status === FileStatus.Ready ? 'Re-parse' : 'Retry'"
+                    >
+                            <RotateCw :size="18" />
+                    </button>
+                </template>
 
                 <!-- 2. Analyze Button -->
                 <button 
-                    class="p-1.5 rounded hover:bg-gray-100 transition-colors"
-                    :class="row.status === FileStatus.Ready ? 'text-blue-600' : 'text-gray-300 cursor-not-allowed'"
+                    class="p-1.5 rounded transition-colors"
+                    :class="row.status === FileStatus.Ready ? 'text-blue-600 hover:text-blue-800 hover:bg-blue-100' : 'text-slate-200 cursor-not-allowed'"
                     :disabled="row.status !== FileStatus.Ready"
                     title="Analyze"
                 >
