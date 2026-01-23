@@ -1,0 +1,13 @@
+# 项目默认规则
+
+1. 前端开发：
+   - 始终使用 Vue 3 (Composition API) 和 TypeScript。
+   - 样式优先使用 Tailwind CSS。
+
+2. 后端开发：
+   - Python 代码需符合 PEP 8 规范。
+   - 每个函数都需要添加 Docstring。
+
+3. 通用：
+   - 回复请使用中文。
+   - 修改代码前先解释思路。

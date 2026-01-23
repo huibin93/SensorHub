@@ -23,20 +23,22 @@ const handleFileUpload = (files: FileList) => {
     <!-- Right: Main Content Area -->
     <div class="flex-1 flex flex-col min-w-0 bg-slate-50/50 relative">
       
-      <main class="flex-1 overflow-y-auto px-6 lg:px-10 py-[20px] custom-scrollbar scroll-smooth">
-        <div class="max-w-[1600px] mx-auto flex flex-col gap-4">
+      <main class="flex-1 flex flex-col overflow-hidden px-6 lg:px-10 py-[20px]">
+        <div class="max-w-[1600px] mx-auto w-full flex flex-col gap-4 h-full">
             <!-- Section 2: Action & Stats Area -->
             <ActionArea />
 
             <!-- Section 3: Data Table Area -->
-            <section class="flex flex-col gap-4">
-                <div class="flex items-center justify-between px-1">
+            <section class="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
+                <div class="flex items-center justify-between px-1 shrink-0">
                 <h2 class="text-lg font-bold text-slate-700 tracking-tight">Recent Data Files</h2>
                 <div class="flex gap-2">
                     <!-- Optional Top Actions -->
                 </div>
                 </div>
-                <DataTable />
+                <div class="flex-1 min-h-0 flex flex-col">
+                    <DataTable />
+                </div>
             </section>
         </div>
       </main>

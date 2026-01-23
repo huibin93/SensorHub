@@ -171,7 +171,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col">
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
     
     <!-- 3.1 Search & Filter Bar -->
     <!-- 3.1 Search & Filter Bar -->
@@ -252,9 +252,9 @@ onUnmounted(() => {
     </div>
 
     <!-- 3.2 The Data Table -->
-    <div class="overflow-x-auto custom-scrollbar">
+    <div class="flex-1 overflow-auto custom-scrollbar min-h-0 relative">
       <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
+        <thead class="bg-gray-50 sticky top-0 z-10 shadow-sm">
           <tr>
             <th scope="col" class="px-4 py-3 text-left w-12 bg-slate-50/50">
               <input 

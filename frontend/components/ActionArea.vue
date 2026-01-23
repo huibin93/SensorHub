@@ -18,7 +18,7 @@ const StatCard = {
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
     <!-- Upload Section (Left - 2/3 width) -->
     <div class="lg:col-span-7 flex flex-col">
-      <h2 class="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2 px-1">
+      <h2 class="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2 px-1 h-[28px]">
           <UploadCloud :size="18" class="text-slate-400" />
           Quick Upload
       </h2>
