@@ -1,42 +1,42 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
+import { storeToRefs } from 'pinia';
 import { 
   Search, Filter, ChevronDown, Eye, Download, MoreHorizontal, 
   RotateCw, Play, Zap, Edit2, Watch, Circle, Trash2, ChevronLeft, ChevronRight 
 } from 'lucide-vue-next';
 import { SensorFile, FileStatus, DeviceType } from '../types';
-import { MOCK_FILES, MOCK_STATS } from '../constants';
 import StatusBadge from './StatusBadge.vue';
-
-
-
-
-
 import EditableTestTypeCell from './EditableTestTypeCell.vue';
 import EditableNoteCell from './EditableNoteCell.vue';
 import EditableDeviceCell from './EditableDeviceCell.vue';
+import { useFileStore } from '../stores/fileStore';
 
-const data = ref<SensorFile[]>(MOCK_FILES);
+// ===== STORE =====
+const fileStore = useFileStore();
+const { files, isLoading } = storeToRefs(fileStore);
+
+// ===== LOCAL UI STATE =====
 const selectedIds = ref<Set<string>>(new Set());
-const editingId = ref<string | null>(null);
-const editingField = ref<'notes' | 'testType' | null>(null);
 const activeRowMenu = ref<string | null>(null);
-
 const filterDevice = ref<string>('All');
 const filterStatus = ref<string>('All');
 
-// Computed filters could be added here to actually filter `data`
-// For now matching React implementation which uses visual-only filters in some parts, 
-// but let's implement actual filtering if the original did? 
-// Original: const [filterDevice, setFilterDevice] = useState<string>('All');
-// But didn't actually filter the map(row => ...). It just updated state. 
-// I will keep it consistent with original (UI only) or implement it if easy. 
-// The original map iterates `data` directly. So filters were just UI controls.
+// ===== LIFECYCLE =====
+onMounted(() => {
+    fileStore.fetchFiles();
+    document.addEventListener('click', handleClickOutside);
+});
 
+onUnmounted(() => {
+    document.removeEventListener('click', handleClickOutside);
+});
+
+// ===== SELECTION HANDLERS =====
 const handleSelectAll = (e: Event) => {
   const checked = (e.target as HTMLInputElement).checked;
   if (checked) {
-    selectedIds.value = new Set(data.value.map(f => f.id));
+    selectedIds.value = new Set(files.value.map(f => f.id));
   } else {
     selectedIds.value = new Set();
   }
@@ -52,99 +52,38 @@ const handleSelectRow = (id: string) => {
   selectedIds.value = newSelected;
 };
 
-const updateField = (id: string, field: keyof SensorFile, value: any) => {
-  data.value = data.value.map(item => item.id === id ? { ...item, [field]: value } : item);
-  if (field !== 'notes') {
-      editingId.value = null;
-      editingField.value = null;
-  }
-};
-
+// ===== UPDATE HANDLERS (delegate to Store) =====
 const updateTestType = (id: string, l1: string, l2: string) => {
-     console.log('[DataTable] updateTestType called', { id, l1, l2 });
-     data.value = data.value.map(item => item.id === id ? { ...item, testTypeL1: l1, testTypeL2: l2 } : item);
-     editingId.value = null;
-     editingField.value = null;
-     console.log('[DataTable] Test type updated successfully');
+    fileStore.updateTestType(id, l1, l2);
 };
 
 const updateNote = (id: string, note: string) => {
-     console.log('[DataTable] updateNote called', { id, note });
-     data.value = data.value.map(item => item.id === id ? { ...item, notes: note } : item);
-     console.log('[DataTable] Note updated successfully');
+    fileStore.updateNote(id, note);
 };
 
 const updateDevice = (id: string, deviceType: DeviceType, deviceModel: string) => {
-     console.log('[DataTable] updateDevice called', { id, deviceType, deviceModel });
-     data.value = data.value.map(item => item.id === id ? { ...item, deviceType, deviceModel } : item);
-     console.log('[DataTable] Device updated successfully');
+    fileStore.updateDevice(id, deviceType, deviceModel);
 };
 
 const triggerParse = (ids: string[]) => {
-    // 1. Optimistically update status to Processing and init progress
-    data.value = data.value.map(item => ids.includes(item.id) ? { ...item, status: FileStatus.Processing, progress: 0 } : item);
-
+    fileStore.triggerParse(ids);
     if (ids.length > 1) selectedIds.value = new Set();
-
-    // 2. Start Mock Progress Interval
-    const interval = setInterval(() => {
-        let anyProcessing = false;
-
-        data.value = data.value.map(item => {
-             if (ids.includes(item.id) && item.status === FileStatus.Processing) {
-                 const newP = (item.progress || 0) + 10; // Increment
-                 
-                 // If complete
-                 if (newP >= 100) {
-                     return {
-                        ...item,
-                        status: FileStatus.Ready,
-                        progress: undefined,
-                         packets: item.packets.length > 0 ? item.packets : [
-                            { name: 'ACC', freq: '100Hz', count: 10000, present: true },
-                            { name: 'PPG', freq: '25Hz', count: 2500, present: true }
-                        ],
-                        duration: item.duration === '--' ? '00:10:00' : item.duration
-                     };
-                 }
-                 
-                 anyProcessing = true;
-                 return { ...item, progress: newP };
-             }
-             return item;
-        });
-        
-        // Stop if no relevant items are still processing
-        // (This simple check might stop too early if something else sets it to processing, strict check is ids.includes)
-        // But for this mock it's fine.
-        const stillRunning = data.value.some(i => ids.includes(i.id) && i.status === FileStatus.Processing);
-        if (!stillRunning) {
-            clearInterval(interval);
-        }
-    }, 200); // Fast updates for demo
 };
 
-const startEditing = (id: string, field: 'testType') => {
-    editingId.value = id;
-    editingField.value = field;
-};
-
-
-
-// Batch Actions
+// ===== BATCH ACTIONS =====
 const handleBatchDownload = () => {
     console.log('Downloading files:', Array.from(selectedIds.value));
     selectedIds.value = new Set();
 };
 
 const handleBatchDelete = () => {
-    const idsToDelete = selectedIds.value;
-    data.value = data.value.filter(item => !idsToDelete.has(item.id));
+    const idsToDelete = Array.from(selectedIds.value);
+    fileStore.deleteFiles(idsToDelete);
     selectedIds.value = new Set();
 };
 
 const deleteRow = (id: string) => {
-    data.value = data.value.filter(item => item.id !== id);
+    fileStore.deleteFile(id);
     activeRowMenu.value = null;
 };
 
@@ -153,20 +92,12 @@ const downloadRow = (id: string) => {
     activeRowMenu.value = null;
 };
 
-// Close menu when clicking outside
+// ===== UI HELPERS =====
 const handleClickOutside = (event: MouseEvent) => {
     if (activeRowMenu.value && !(event.target as Element).closest('.row-menu-container')) {
         activeRowMenu.value = null;
     }
 };
-
-onMounted(() => {
-    document.addEventListener('click', handleClickOutside);
-});
-
-onUnmounted(() => {
-    document.removeEventListener('click', handleClickOutside);
-});
 
 </script>
 
@@ -261,7 +192,7 @@ onUnmounted(() => {
                   type="checkbox" 
                   class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   @change="handleSelectAll"
-                  :checked="data.length > 0 && selectedIds.size === data.length"
+                  :checked="files.length > 0 && selectedIds.size === files.length"
               />
             </th>
             <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50">Status</th>
@@ -275,7 +206,7 @@ onUnmounted(() => {
           </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
-          <tr v-for="row in data" :key="row.id" 
+          <tr v-for="row in files" :key="row.id" 
               class="hover:bg-blue-50/30 transition-colors" 
               :class="{ 'bg-blue-50/50': selectedIds.has(row.id) }">
             <td class="px-4 py-3 whitespace-nowrap">
@@ -413,7 +344,7 @@ onUnmounted(() => {
                 </div>
             </div>
             
-            <span class="text-gray-500">Total {{ MOCK_STATS.totalFiles }} items</span>
+            <span class="text-gray-500">Total {{ fileStore.stats.totalFiles }} items</span>
         </div>
 
         <!-- Right: Pagination -->

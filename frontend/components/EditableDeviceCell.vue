@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, nextTick, onMounted } from 'vue';
 import { Watch, Circle, X, Check } from 'lucide-vue-next';
 import { DeviceType } from '../types';
 import { 
   deviceTypeOptions, 
   deviceModels, 
-  addDeviceModel 
+  addDeviceModel,
+  fetchDevices
 } from '../stores/deviceStore';
+
+// Load devices on mount
+onMounted(() => {
+    fetchDevices();
+});
 
 const props = defineProps<{
   initialDeviceType: DeviceType;

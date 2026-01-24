@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, nextTick, onMounted } from 'vue';
 import { ChevronDown, X, Check } from 'lucide-vue-next';
 import { 
   testTypesL1, 
   testTypesL2, 
   addTestTypeL1, 
-  getTestTypesL2 
+  getTestTypesL2,
+  fetchTestTypes
 } from '../stores/testTypeStore';
+
+// Load test types on mount
+onMounted(() => {
+    fetchTestTypes();
+});
 
 const props = defineProps<{
   initialL1: string;
