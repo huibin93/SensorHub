@@ -106,7 +106,39 @@ The frontend can work in two modes:
 
 > **Note**: In Mock Mode, changes are not persisted after page refresh. Use API Mode for full persistence.
 
+
 ---
+
+## Database Environment
+
+You can switch between **Test** (mock data) and **Production** modes via `backend/config.json`.
+
+### configuration (`backend/config.json`)
+
+```json
+"database": {
+    "directory": "database",
+    "use_test_db": true,  // true = test.db, false = sensorhub.db
+    "echo": false
+}
+```
+
+### Database Utilities
+
+1. **Initialize Test Database**
+   Creates `database/test.db` and populates it with mock data (if it doesn't exist).
+   ```bash
+   uv run python backend/test_db.py
+   ```
+
+2. **Check Database Connection**
+   Verifies which database the app is currently using and prints stats.
+   ```bash
+   uv run python backend/check_db.py
+   ```
+
+---
+
 
 ## API Endpoints
 

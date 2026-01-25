@@ -5,8 +5,8 @@ export enum DeviceType {
 
 export enum FileStatus {
   Idle = 'Idle',
-  Ready = 'Ready',
-  Processing = 'Processing',
+  Processed = 'Processed',   // 后端最终状态: 已处理
+  Processing = 'Processing', // 仅前端本地动画状态
   Failed = 'Failed',
 }
 

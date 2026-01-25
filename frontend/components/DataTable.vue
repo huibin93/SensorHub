@@ -141,8 +141,7 @@ const handleClickOutside = (event: MouseEvent) => {
                 >
                 <option value="All">Status: All</option>
                 <option value="Idle">Idle</option>
-                <option value="Ready">Ready</option>
-                <option value="Processing">Processing</option>
+                <option value="Processed">Processed</option>
                 <option value="Failed">Failed</option>
                 </select>
                 <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" :size="14" />
@@ -272,11 +271,11 @@ const handleClickOutside = (event: MouseEvent) => {
                         <Play :size="18" />
                     </button>
                     <button 
-                        v-if="row.status === FileStatus.Failed || row.status === FileStatus.Ready"
+                        v-if="row.status === FileStatus.Failed || row.status === FileStatus.Processed"
                         @click="triggerParse([row.id])"
                         class="p-1.5 rounded transition-colors"
-                        :class="row.status === FileStatus.Ready ? 'hover:bg-blue-50 text-blue-400 hover:text-blue-600' : 'hover:bg-orange-50 text-orange-400 hover:text-orange-600'" 
-                        :title="row.status === FileStatus.Ready ? 'Re-parse' : 'Retry'"
+                        :class="row.status === FileStatus.Processed ? 'hover:bg-blue-50 text-blue-400 hover:text-blue-600' : 'hover:bg-orange-50 text-orange-400 hover:text-orange-600'" 
+                        :title="row.status === FileStatus.Processed ? 'Re-parse' : 'Retry'"
                     >
                             <RotateCw :size="18" />
                     </button>
@@ -285,8 +284,8 @@ const handleClickOutside = (event: MouseEvent) => {
                 <!-- 2. Analyze Button -->
                 <button 
                     class="p-1.5 rounded transition-colors"
-                    :class="row.status === FileStatus.Ready ? 'text-blue-600 hover:text-blue-800 hover:bg-blue-100' : 'text-slate-200 cursor-not-allowed'"
-                    :disabled="row.status !== FileStatus.Ready"
+                    :class="row.status === FileStatus.Processed ? 'text-blue-600 hover:text-blue-800 hover:bg-blue-100' : 'text-slate-200 cursor-not-allowed'"
+                    :disabled="row.status !== FileStatus.Processed"
                     title="Analyze"
                 >
                     <Eye :size="18" />

@@ -43,3 +43,5 @@ venv/
 
 # uv
 .python-version
+backend/storage
+test_data

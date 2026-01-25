@@ -174,7 +174,7 @@ const triggerFileInput = () => {
          <!-- Spacer to match Left Title Alignment -->
         <div class="mb-3 h-[28px] flex items-end pb-1 px-1 justify-between">
            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">System Overview</span>
-           <span class="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Updated: Just now</span>
+           <span class="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Updated: {{ fileStore.stats.lastUpdated || '--' }}</span>
         </div>
 
         <!-- Merged Stats Container -->

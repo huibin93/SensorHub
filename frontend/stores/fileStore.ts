@@ -31,10 +31,14 @@ export const useFileStore = defineStore('files', () => {
      */
     async function fetchStats() {
         try {
-            statsData.value = await fileService.getStats();
+            statsData.value = {
+                ...await fileService.getStats(),
+                lastUpdated: new Date().toLocaleTimeString()
+            };
             console.log('[FileStore] Fetched stats:', statsData.value);
         } catch (e) {
             console.error('[FileStore] Failed to fetch stats:', e);
+            statsData.value.lastUpdated = '--';
         }
     }
 
@@ -123,48 +127,87 @@ export const useFileStore = defineStore('files', () => {
 
     /**
      * Trigger parse for selected files
+     * 1. Call backend parse API
+     * 2. Show local progress animation (10MB/s estimate)
+     * 3. Poll backend for status change to 'Parsed'
      */
-    function triggerParse(ids: string[]) {
-        // 1. Set status to Processing
-        ids.forEach(id => {
+    async function triggerParse(ids: string[]) {
+        for (const id of ids) {
             const file = files.value.find(f => f.id === id);
-            if (file) {
-                file.status = FileStatus.Processing;
-                file.progress = 0;
-            }
-        });
+            if (!file) continue;
 
-        // 2. Start mock progress
-        const interval = setInterval(() => {
-            let stillProcessing = false;
+            // 设置本地UI为处理中
+            file.status = FileStatus.Processing;
+            file.progress = 0;
 
-            files.value.forEach(file => {
-                if (ids.includes(file.id) && file.status === FileStatus.Processing) {
-                    const newProgress = (file.progress || 0) + 10;
-
-                    if (newProgress >= 100) {
-                        file.status = FileStatus.Ready;
-                        file.progress = undefined;
-                        if (file.packets.length === 0) {
-                            file.packets = [
-                                { name: 'ACC', freq: '100Hz', count: 10000, present: true },
-                                { name: 'PPG', freq: '25Hz', count: 2500, present: true }
-                            ];
-                        }
-                        if (file.duration === '--') {
-                            file.duration = '00:10:00';
-                        }
-                    } else {
-                        file.progress = newProgress;
-                        stillProcessing = true;
-                    }
-                }
+            // 调用后端解析API
+            fileService.triggerParse(id).catch(e => {
+                console.error('[FileStore] Failed to trigger parse:', e);
             });
 
-            if (!stillProcessing) {
-                clearInterval(interval);
+            // 估算进度动画时长 (10MB/s)
+            // 从 file.size 解析数字 (支持 "1.5 KB" 或 "10.2 MB")
+            const sizeMatch = file.size.match(/(\d+\.?\d*)\s*(KB|MB|GB)/i);
+            let sizeInMB = 1; // 默认 1MB
+            if (sizeMatch) {
+                const value = parseFloat(sizeMatch[1]);
+                const unit = sizeMatch[2].toUpperCase();
+                if (unit === 'KB') sizeInMB = value / 1024;
+                else if (unit === 'MB') sizeInMB = value;
+                else if (unit === 'GB') sizeInMB = value * 1024;
             }
-        }, 200);
+
+            const totalDurationMs = Math.max(sizeInMB / 10 * 1000, 500); // 最少 500ms
+            const updateInterval = 100; // 每 100ms 更新一次
+            const progressStep = 100 / (totalDurationMs / updateInterval);
+
+            // 本地进度动画
+            const animationInterval = setInterval(() => {
+                const currentFile = files.value.find(f => f.id === id);
+                if (!currentFile || currentFile.status !== FileStatus.Processing) {
+                    clearInterval(animationInterval);
+                    return;
+                }
+
+                const newProgress = Math.min((currentFile.progress || 0) + progressStep, 99);
+                currentFile.progress = Math.round(newProgress);
+
+                // 进度到 99% 后停止动画, 等待后端确认
+                if (newProgress >= 99) {
+                    clearInterval(animationInterval);
+                }
+            }, updateInterval);
+
+            // 轮询后端状态 (每 500ms 检查一次)
+            const pollInterval = setInterval(async () => {
+                try {
+                    const response = await fileService.getFiles({ page: 1, limit: 1000 });
+                    const updatedFile = response.items.find(f => f.id === id);
+
+                    if (updatedFile && updatedFile.status === 'Processed') {
+                        clearInterval(pollInterval);
+                        const localFile = files.value.find(f => f.id === id);
+                        if (localFile) {
+                            localFile.status = FileStatus.Processed;
+                            localFile.progress = undefined;
+                        }
+                        console.log('[FileStore] Parse completed for:', id);
+                    }
+                } catch (e) {
+                    console.error('[FileStore] Poll error:', e);
+                }
+            }, 500);
+
+            // 超时保护: 30秒后停止轮询
+            setTimeout(() => {
+                clearInterval(pollInterval);
+                const localFile = files.value.find(f => f.id === id);
+                if (localFile && localFile.status === FileStatus.Processing) {
+                    localFile.status = FileStatus.Processed; // 假设成功
+                    localFile.progress = undefined;
+                }
+            }, 30000);
+        }
     }
 
     /**

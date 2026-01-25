@@ -17,7 +17,11 @@
         ]
     },
     "database": {
-        "path": "sensorhub.db",
+        "directory": "database",
+        "use_test_db": false,
         "echo": false
+    },
+    "storage": {
+        "zip_pp": "creek666"
     }
 }

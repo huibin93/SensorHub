@@ -13,8 +13,8 @@ defineProps<{
     <Clock :size="12" /> Idle
   </span>
   
-  <span v-else-if="status === FileStatus.Ready" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
-    <CheckCircle2 :size="12" /> Ready
+  <span v-else-if="status === FileStatus.Processed" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+    <CheckCircle2 :size="12" /> Processed
   </span>
 
   <span v-else-if="status === FileStatus.Processing" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
