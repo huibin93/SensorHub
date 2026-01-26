@@ -3,7 +3,7 @@
 
 本模块提供传感器文件的 CRUD 操作、上传、下载、解析等 API 端点。
 """
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Header
 from pathlib import Path
 from sqlmodel import Session
 from typing import List, Optional
@@ -57,36 +57,121 @@ def get_files(
     Returns:
         PaginatedFilesResponse: 分页的文件列表。
     """
-    skip = (page - 1) * limit
-    files, total = crud.get_files(session, skip, limit, search, device, status, sort)
-    return {
-        "items": files,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "totalPages": (total + limit - 1) // limit if limit > 0 else 1
-    }
+    try:
+        skip = (page - 1) * limit
+        files, total = crud.get_files(session, skip, limit, search, device, status, sort)
+        return {
+            "items": files,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "totalPages": (total + limit - 1) // limit if limit > 0 else 1
+        }
+    except Exception as e:
+        import traceback
+        logger.error(f"Error in get_files: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/files/check")
+def check_file(hash: str, session: Session = Depends(deps.get_db)):
+    """
+    检查文件是否已存在（秒传）。
+    
+    Args:
+        hash: 文件 Hash (MD5).
+        
+    Returns:
+        dict: {exists: bool, file: ...}
+    """
+    file = crud.get_file_by_hash(session, hash)
+    if file:
+        return {"exists": True, "fileId": file.id, "filename": file.filename}
+    return {"exists": False}
 
 
 @router.post("/files/upload", response_model=api_models.UploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
     deviceType: Optional[str] = Form(None),
+    x_original_hash: Optional[str] = Header(None, alias="X-Original-Hash"),
+    x_original_size: Optional[str] = Header(None, alias="X-Original-Size"),
     session: Session = Depends(deps.get_db)
 ) -> api_models.UploadResponse:
     """
-    上传传感器文件。
-
-    Args:
-        file: 上传的文件。
-        deviceType: 设备类型（可选，会尝试从文件名推断）。
-
-    Returns:
-        UploadResponse: 上传结果，包含文件 ID 和状态。
-
-    Raises:
-        HTTPException: 上传失败时抛出 500 错误。
+    上传传感器文件。支持普通上传和 Zstd 压缩上传（带用于校验的 Hash）。
     """
+    # 如果有 X-Original-Hash，走新流程
+    if x_original_hash:
+        # === 1. 尝试直接查找已存在文件 (幂等性) ===
+        existing_file = session.get(SensorFile, x_original_hash)
+        if existing_file:
+             return {"id": existing_file.id, "filename": existing_file.filename, "status": "success", "message": "Uploaded (Deduplicated)"}
+
+        try:
+            # === 2. 保存物理文件 (Zstd 逻辑) ===
+            # file.filename 应该是 name.zst
+            result = await StorageService.verify_and_save_zstd(file, x_original_hash)
+            
+            # 去掉 .zst 后缀作为原始文件名 (约定)
+            original_filename = file.filename
+            if original_filename.endswith('.zst'):
+                original_filename = original_filename[:-4]
+            
+            # Enforce .rawdata extension
+            if not original_filename.lower().endswith('.rawdata'):
+                raise HTTPException(status_code=400, detail="Only .rawdata files are allowed")
+
+            # 大小
+            size_bytes = int(x_original_size) if x_original_size else result["file_size"]
+            if size_bytes < 1024 * 1024:
+                size_str = f"{size_bytes / 1024:.1f} KB"
+            else:
+                size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+                
+            # Device Type
+            d_type = deviceType or "Unknown"
+            if d_type == "Unknown":
+                if "Watch" in original_filename:
+                    d_type = "Watch"
+                elif "Ring" in original_filename:
+                    d_type = "Ring"
+            
+            # === 3. 写入数据库 ===
+            # 强制 ID = Hash
+            sensor_file = SensorFile(
+                id=x_original_hash,
+                filename=original_filename,
+                deviceType=d_type,
+                deviceModel="Unknown",
+                size=size_str,
+                uploadTime=datetime.utcnow().isoformat(),
+                rawPath=result["raw_path"],
+                processedDir=str(StorageService.get_processed_dir(x_original_hash)),
+                content_meta={},
+                hash=x_original_hash,
+                status="Idle" 
+            )
+            crud.create_file(session, sensor_file)
+            
+            return {"id": x_original_hash, "filename": original_filename, "status": "success", "message": "Uploaded (Zstd Verified)"}
+            
+        except ValueError as e:
+            # Hash mismatch or corrupt
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            # Check for IntegrityError (Concurrency Race)
+            # Since we imported generic Exception, we check class name or use specific import
+            if "IntegrityError" in type(e).__name__:
+                 session.rollback()
+                 existing = session.get(SensorFile, x_original_hash)
+                 if existing:
+                      return {"id": existing.id, "filename": existing.filename, "status": "success", "message": "Uploaded (Generic Race)"}
+
+            logger.error(f"Zstd Upload error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # === 旧流程 (Fallback) ===
     # Validate file extension
     ALLOWED_EXTENSIONS = {'.zip', '.rawdata'}
     file_ext = Path(file.filename).suffix.lower() if file.filename else ""

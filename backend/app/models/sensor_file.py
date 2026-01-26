@@ -56,6 +56,7 @@ class SensorFile(SQLModel, table=True):
     content_meta: Optional[dict] = Field(default={}, sa_column=Column(JSON))
     raw_path: Optional[str] = Field(default=None, alias="rawPath")
     processed_dir: Optional[str] = Field(default=None, alias="processedDir")
+    hash: Optional[str] = Field(default=None, index=True)
 
     class Config:
         """Pydantic 配置。"""

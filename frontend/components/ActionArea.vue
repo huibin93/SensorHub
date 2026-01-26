@@ -2,7 +2,10 @@
 import { UploadCloud, FileText, Database, CheckCircle, Clock, Loader2, X, Check } from 'lucide-vue-next';
 import { useFileStore } from '../stores/fileStore';
 import { fileService } from '../services/fileService';
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
+import ZstdWorker from '../workers/zstd.worker.js?worker';
+import JSZip from 'jszip';
+import { v4 as uuidv4 } from 'uuid';
 
 const fileStore = useFileStore();
 
@@ -10,19 +13,209 @@ const fileStore = useFileStore();
 const isDragging = ref(false);
 const isUploading = ref(false);
 const uploadProgress = ref(0);
-const uploadStatus = ref<'idle' | 'uploading' | 'success' | 'error'>('idle');
+const uploadStatus = ref('idle');
 const uploadMessage = ref('');
-const fileInputRef = ref<HTMLInputElement | null>(null);
+const fileInputRef = ref(null) as any;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
-// Fetch stats on mount
+// Toast State
+const toasts = ref<{id: number, msg: string, type: 'error' | 'success'}[]>([]);
+
+const addToast = (msg: string, type: 'error' | 'success' = 'error') => {
+    const id = Date.now() + Math.random();
+    toasts.value.push({id, msg, type});
+    setTimeout(() => {
+        toasts.value = toasts.value.filter(t => t.id !== id);
+    }, 3000);
+};
+
+// Worker & Concurrency Control
+const worker = new ZstdWorker();
+const workerResolvers = new Map<string, { resolve: (value: any) => void, reject: (reason?: any) => void }>();
+
+// Fetch stats on mount & Setup Worker Listener
 onMounted(() => {
     fileStore.fetchStats();
+
+    worker.onmessage = (e) => {
+        const { id, status, message, ...data } = e.data;
+        
+        // Find promise resolver by ID
+        const resolver = workerResolvers.get(id);
+        if (!resolver) return;
+
+        if (status === 'error') {
+            resolver.reject(new Error(message));
+        } else {
+            resolver.resolve(data); // Returns { hash } or { blob }
+        }
+        workerResolvers.delete(id);
+    };
 });
 
-// Handle file selection
-const handleFileSelect = (files: FileList | null) => {
+onUnmounted(() => {
+    worker.terminate();
+});
+
+// Helper to call worker with Promise
+const callWorker = (action: string, payload: any): Promise<any> => {
+    return new Promise((resolve, reject) => {
+        const id = uuidv4();
+        workerResolvers.set(id, { resolve, reject });
+        worker.postMessage({ id, action, ...payload });
+    });
+};
+
+// Handle file selection (Entry Point)
+const handleFileSelect = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
-    uploadFile(files[0]);
+
+    // Reset UI State if not already uploading
+    if (!isUploading.value) {
+        uploadStatus.value = 'idle';
+        uploadMessage.value = '';
+        uploadProgress.value = 0;
+    }
+
+    const fileArray = Array.from(files);
+    let hasValidFiles = false;
+    
+    try {
+        for (const file of fileArray) {
+            const ext = file.name.split('.').pop()?.toLowerCase();
+            if (ext === 'zip') {
+                hasValidFiles = true;
+                if (!isUploading.value) {
+                     isUploading.value = true;
+                     uploadStatus.value = 'uploading';
+                }
+                await handleZipFile(file);
+            } else if (ext === 'rawdata') {
+                hasValidFiles = true;
+                if (!isUploading.value) {
+                     isUploading.value = true;
+                     uploadStatus.value = 'uploading';
+                }
+                await processAndUpload(file);
+            } else {
+                console.warn(`Skipped unsupported file: ${file.name}`);
+                addToast(`Skipped ${file.name}: Only .rawdata or .zip allowed`, 'error');
+            }
+        }
+        
+        if (hasValidFiles) {
+            // Final success state if all went well
+            uploadStatus.value = 'success';
+            uploadMessage.value = 'All tasks complete!';
+
+            // Refresh Data
+            await fileStore.fetchFiles();
+            await fileStore.fetchStats();
+
+            setTimeout(() => { 
+                uploadStatus.value = 'idle'; 
+                isUploading.value = false;
+            }, 2000);
+        } else if (fileArray.length === 1 && !hasValidFiles) {
+             // If user selected only 1 file and it was invalid, show error on card too?
+             // But Toast is enough. We can reset card.
+             uploadStatus.value = 'idle'; 
+        }
+
+    } catch (e) {
+        console.error(e);
+        uploadStatus.value = 'error';
+        uploadMessage.value = e instanceof Error ? e.message : 'Upload failed';
+        addToast(uploadMessage.value, 'error');
+        setTimeout(() => { 
+            uploadStatus.value = 'idle'; 
+            isUploading.value = false;
+        }, 5000);
+    }
+};
+
+// Handle ZIP processing (Serial extraction & upload)
+const handleZipFile = async (zipFile: File) => {
+    uploadMessage.value = `Unzipping ${zipFile.name}...`;
+    try {
+        const zip = await JSZip.loadAsync(zipFile);
+        const entries: JSZip.JSZipObject[] = [];
+
+        // Collect valid files first
+        zip.forEach((relativePath, zipEntry) => {
+            if (zipEntry.dir) return;
+            // Filter logic: here we allow .rawdata
+            if (relativePath.endsWith('.rawdata')) {
+                entries.push(zipEntry);
+            }
+        });
+
+        if (entries.length === 0) {
+            addToast(`No .rawdata files found in ${zipFile.name}`, 'error');
+            return; // Skip if empty or no match
+        }
+
+        // Process serially to prevent OOM
+        let count = 0;
+        for (const entry of entries) {
+            count++;
+            uploadMessage.value = `[${count}/${entries.length}] Unzipping ${entry.name}...`;
+            const blob = await entry.async('blob');
+            // Create File object to keep name and metadata if possible
+            const file = new File([blob], entry.name);
+            await processAndUpload(file);
+        }
+
+    } catch (err) {
+        throw new Error(`Failed to unzip ${zipFile.name}: ${(err as Error).message}`);
+    }
+};
+
+// Core Upload Pipeline (Single File)
+const processAndUpload = async (file: File) => {
+    const filename = file.name;
+    uploadMessage.value = `Processing ${filename}...`;
+
+    // 1. Compute Hash
+    const { hash } = await callWorker('calcHash', { file });
+    
+    // 2. Check Deduplication
+    uploadMessage.value = `Checking ${filename}...`;
+    const checkRes = await fetch(`${API_BASE_URL}/files/check?hash=${hash}`);
+    const checkData = await checkRes.json();
+    
+    if (checkData.exists) {
+        uploadMessage.value = `[Skipped] ${filename} already exists.`;
+        addToast(`${filename} skipped (duplicate)`, 'success');
+        // Short delay to let user see the message
+        await new Promise(r => setTimeout(r, 500)); 
+        return; 
+    }
+
+    // 3. Compress
+    uploadMessage.value = `Compressing ${filename}...`;
+    const { blob: compressedBlob } = await callWorker('compress', { file, level: 6 });
+
+    // 4. Upload
+    uploadMessage.value = `Uploading ${filename}...`;
+    const formData = new FormData();
+    formData.append('file', compressedBlob, filename + '.zst');
+    
+    const response = await fetch(`${API_BASE_URL}/files/upload`, {
+        method: 'POST',
+        headers: {
+            'X-Original-Hash': hash as string,
+            'X-Original-Size': String(file.size)
+        },
+        body: formData
+    });
+    
+    if (!response.ok) {
+        throw new Error(`Failed to upload ${filename}: ${response.statusText}`);
+    }
+    
+    uploadMessage.value = `Uploaded ${filename}`;
+    addToast(`Uploaded ${filename}`, 'success');
 };
 
 // Handle drag events
@@ -41,55 +234,36 @@ const handleDrop = (e: DragEvent) => {
     handleFileSelect(e.dataTransfer?.files || null);
 };
 
-// Upload file
-const uploadFile = async (file: File) => {
-    // Validate extension
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    if (!['rawdata', 'zip'].includes(ext || '')) {
-        uploadStatus.value = 'error';
-        uploadMessage.value = 'Invalid file type. Use .rawdata or .zip';
-        setTimeout(() => { uploadStatus.value = 'idle'; }, 3000);
-        return;
-    }
-
-    isUploading.value = true;
-    uploadStatus.value = 'uploading';
-    uploadProgress.value = 0;
-    uploadMessage.value = file.name;
-
-    try {
-        await fileService.uploadFile(file, (progress) => {
-            uploadProgress.value = progress;
-        });
-        
-        uploadStatus.value = 'success';
-        uploadMessage.value = 'Upload complete!';
-        
-        // Refresh file list and stats
-        await fileStore.fetchFiles();
-        await fileStore.fetchStats();
-        
-        setTimeout(() => { 
-            uploadStatus.value = 'idle'; 
-            isUploading.value = false;
-        }, 2000);
-    } catch (e) {
-        uploadStatus.value = 'error';
-        uploadMessage.value = e instanceof Error ? e.message : 'Upload failed';
-        setTimeout(() => { 
-            uploadStatus.value = 'idle'; 
-            isUploading.value = false;
-        }, 3000);
-    }
-};
-
-// Trigger file input
 const triggerFileInput = () => {
     fileInputRef.value?.click();
 };
+
+defineExpose({ handleFileSelect });
 </script>
 
 <template>
+  <!-- Toast Container -->
+  <div class="fixed top-20 right-6 z-50 flex flex-col gap-2 pointer-events-none sticky-toast-container">
+    <TransitionGroup 
+      enter-active-class="transition duration-300 ease-out" 
+      enter-from-class="translate-x-full opacity-0" 
+      enter-to-class="translate-x-0 opacity-100" 
+      leave-active-class="transition duration-200 ease-in" 
+      leave-from-class="translate-x-0 opacity-100" 
+      leave-to-class="translate-x-full opacity-0"
+    >
+      <div 
+        v-for="toast in toasts" 
+        :key="toast.id" 
+        class="px-4 py-3 rounded-lg shadow-lg border pointer-events-auto flex items-center gap-2 min-w-[300px]"
+        :class="toast.type === 'error' ? 'bg-white border-red-100 text-red-600' : 'bg-white border-green-100 text-green-600'"
+      >
+         <component :is="toast.type === 'error' ? X : Check" :size="18" />
+         <span class="text-sm font-medium">{{ toast.msg }}</span>
+      </div>
+    </TransitionGroup>
+  </div>
+
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
     <!-- Upload Section (Left - 2/3 width) -->
     <div class="lg:col-span-7 flex flex-col">
@@ -103,6 +277,7 @@ const triggerFileInput = () => {
         type="file" 
         ref="fileInputRef"
         class="hidden" 
+        multiple
         accept=".rawdata,.zip"
         @change="handleFileSelect(($event.target as HTMLInputElement).files)"
       />
@@ -145,10 +320,9 @@ const triggerFileInput = () => {
           <div class="w-48 h-2 bg-slate-200 rounded-full overflow-hidden">
             <div 
               class="h-full bg-blue-500 transition-all duration-300"
-              :style="{ width: `${uploadProgress}%` }"
+              :style="{ width: '100%' }" 
             ></div>
           </div>
-          <p class="text-xs text-blue-600 font-semibold mt-2">{{ uploadProgress }}%</p>
         </template>
         
         <!-- Success State -->

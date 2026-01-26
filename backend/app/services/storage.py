@@ -207,3 +207,78 @@ class StorageService:
         if proc_dir.exists() and proc_dir.is_dir():
             shutil.rmtree(proc_dir)
             logger.info(f"Deleted processed dir: {proc_dir}")
+
+    @staticmethod
+    async def verify_and_save_zstd(file: UploadFile, file_hash: str) -> Dict[str, Any]:
+        """
+        保存并校验 Zstd 压缩文件。
+        
+        Args:
+            file: 上传的 .zst 文件流。
+            file_hash: 前端计算的原始文件 Hash (Expectation)。
+            
+        Returns:
+            Dict: 存储结果 (如果有错误则抛出异常)。
+        """
+        import zstandard as zstd
+        import hashlib
+        
+        raw_dir = StorageService.get_raw_dir()
+        # 命名规则: {hash}.zst
+        # 注意: 如果不同用户传相同文件，hash相同，会覆盖还是复用？
+        # 秒传逻辑下，如果Hash已存在，通常不再调 Upload。
+        # 如果Hash不存在，这里保存。
+        # 为了避免文件名冲突(万一不同内容Hash碰撞? MD5有可能)，可以加UUID?
+        # 但秒传依赖 Hash 唯一性。我们假设 Hash 足够强 (MD5/SHA256)。
+        # 用户需求: storage/{x_original_hash}.zst
+        zst_path = raw_dir / f"{file_hash}.zst"
+        
+        # 1. 保存 .zst 文件
+        # 注意: 这一步只是暂存，如果校验失败需要删除
+        # 但为了性能，直接写入目标位置
+        logger.info(f"Saving zst file to {zst_path}")
+        try:
+            with zst_path.open("wb") as buffer:
+                # 使用 copyfileobj 高效写入
+                await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
+        except Exception as e:
+            logger.error(f"Failed to save zst file: {e}")
+            raise
+            
+        # 2. 边解压边计算 Hash
+        logger.info("Verifying zst integrity...")
+        dctx = zstd.ZstdDecompressor()
+        # 根据前端 SparkMD5，这里也用 MD5。如果未来改前端，这里必须同步。
+        hasher = hashlib.md5() 
+        
+        def _verify():
+            with zst_path.open('rb') as ifh:
+                with dctx.stream_reader(ifh) as reader:
+                    while True:
+                        chunk = reader.read(65536) # 64KB
+                        if not chunk:
+                            break
+                        hasher.update(chunk)
+            return hasher.hexdigest()
+            
+        try:
+            calculated_hash = await run_in_threadpool(_verify)
+        except Exception as e:
+            # 解压失败，可能是文件损坏
+            logger.error(f"Zstd decompression failed: {e}")
+            if zst_path.exists():
+                zst_path.unlink()
+            raise ValueError("Corrupted zstd file")
+            
+        logger.info(f"Expected: {file_hash}, Calculated: {calculated_hash}")
+        
+        if calculated_hash != file_hash:
+            # 校验失败
+            if zst_path.exists():
+                zst_path.unlink()
+            raise ValueError(f"Hash mismatch! Expected {file_hash} but got {calculated_hash}")
+            
+        return {
+            "raw_path": str(zst_path),
+            "file_size": zst_path.stat().st_size
+        }

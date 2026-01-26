@@ -6,7 +6,8 @@ import {
   testTypesL2, 
   addTestTypeL1, 
   getTestTypesL2,
-  fetchTestTypes
+  fetchTestTypes,
+  addTestTypeL2
 } from '../stores/testTypeStore';
 
 // Load test types on mount
@@ -220,7 +221,6 @@ const selectL2 = async (option: string) => {
     actualType = option.replace('__CREATE_L2__', '');
     console.log('[EditableTestTypeCell] Creating new L2 type:', actualType);
     // Add to the store
-    const { addTestTypeL2 } = await import('../stores/testTypeStore');
     addTestTypeL2(selectedL1.value, actualType);
   }
   
@@ -263,7 +263,6 @@ const save = async () => {
   
   // 如果用户输入了新的Sub Type，添加到全局列表
   if (finalL2 && finalL2 !== '--' && !getTestTypesL2(finalL1).includes(finalL2)) {
-    const { addTestTypeL2 } = await import('../stores/testTypeStore');
     const added = addTestTypeL2(finalL1, finalL2);
     if (added) {
       console.log('[EditableTestTypeCell] Added new Sub Type to global list:', finalL2);

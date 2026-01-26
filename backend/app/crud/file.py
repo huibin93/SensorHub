@@ -173,3 +173,18 @@ def delete_file(session: Session, file_id: str) -> None:
     if file:
         session.delete(file)
         session.commit()
+
+
+def get_file_by_hash(session: Session, file_hash: str) -> Optional[SensorFile]:
+    """
+    根据 Hash 获取文件。
+
+    Args:
+        session: 数据库会话。
+        file_hash: 文件 Hash。
+
+    Returns:
+        Optional[SensorFile]: 文件对象，不存在时返回 None。
+    """
+    return session.exec(select(SensorFile).where(SensorFile.hash == file_hash)).first()
+
