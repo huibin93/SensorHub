@@ -38,33 +38,61 @@ class StorageService:
     @staticmethod
     async def save_rawdata_file(file: UploadFile, file_id: str) -> Dict[str, Any]:
         """
-        流式 gzip 压缩保存 .rawdata 文件;
-
-        Args:
-            file: 上传文件对象;
-            file_id: 文件 ID;
+        流式 gzip 压缩保存 .rawdata 文件，并计算 Hash 实现物理去重;
 
         Returns:
-            Dict: 包含 raw_path 的存储结果;
+            Dict: 包含 raw_path, file_size, file_hash 的存储结果;
         """
+        import hashlib
+        import os
+        
         raw_dir = StorageService.get_raw_dir()
-        # 保存为 file_id.rawdata.gz
-        destination = raw_dir / f"{file_id}.rawdata.gz"
+        # 1. 保存临时文件
+        temp_filename = f"temp_{file_id}_{uuid.uuid4()}.gz"
+        temp_path = raw_dir / temp_filename
         
-        def _stream_compress():
-            with gzip.open(destination, 'wb') as gz_file:
-                # 分块读取,边接收边压缩
-                while chunk := file.file.read(8192):  # 8KB chunks
+        hasher = hashlib.md5()
+        file_size = 0
+        
+        def _stream_compress_and_hash():
+            nonlocal file_size
+            with gzip.open(temp_path, 'wb') as gz_file:
+                while chunk := file.file.read(8192):
+                    # 注意: Hash 是基于原始数据还是压缩数据? 
+                    # 通常基于原始文件内容(便于跨格式比对)，但这里我们只能拿到原始流
+                    # 如果要跟 Zstd 互通，应该 Hash 原始数据。
+                    # 这里的 chunk 是原始数据。
+                    hasher.update(chunk)
                     gz_file.write(chunk)
+            nonlocal file_size 
+            file_size = temp_path.stat().st_size
         
-        await run_in_threadpool(_stream_compress)
+        await run_in_threadpool(_stream_compress_and_hash)
         
-        file_size = destination.stat().st_size
-        logger.info(f"Saved rawdata with streaming gzip: {destination} ({file_size} bytes)")
+        file_hash = hasher.hexdigest()
         
+        # 2. 物理去重检查
+        final_filename = f"{file_hash}.rawdata.gz"
+        final_path = raw_dir / final_filename
+        
+        deduplicated = False
+        if final_path.exists():
+            # 已存在，删除临时文件
+            if temp_path.exists():
+                temp_path.unlink()
+            deduplicated = True
+            file_size = final_path.stat().st_size # 使用现有文件大小
+            logger.info(f"Physical deduplication hit: {file_hash}")
+        else:
+            # 不存在，重命名
+            temp_path.rename(final_path)
+            logger.info(f"Saved new physical file: {final_path}")
+            
         return {
-            "raw_path": str(destination),
-            "file_size": file_size,
+            "raw_path": str(final_path),
+            "file_size": file_size,  # 物理文件大小
+            "file_hash": file_hash,
+            "deduplicated": deduplicated,
             "extracted_files": []
         }
 
@@ -106,8 +134,8 @@ class StorageService:
                         # 为该文件生成新的 ID
                         new_file_id = str(uuid.uuid4())
                         
-                        # 像普通上传一样保存到 raw 目录 (gzip)
-                        dest_path = raw_dir / f"{new_file_id}.rawdata.gz"
+                        # 临时保存路径
+                        dest_path_temp = raw_dir / f"temp_{new_file_id}.gz"
                         
                         # 使用流式处理避免将整个文件加载到内存
                         original_size = 0
@@ -118,13 +146,21 @@ class StorageService:
                             else:
                                 src_stream = zf.open(member)
                                 
-                            with src_stream as src, gzip.open(dest_path, 'wb') as dst:
-                                # shutil.copyfileobj 默认使用 chunks (通常 16KB-64KB)
-                                shutil.copyfileobj(src, dst)
-                                # 无法直接获取大小，需要通过 info 获取或在 copy 时计数
-                                # 这里使用 zip info 获取原始大小
-                                original_size = zf.getinfo(member).file_size
+                            with src_stream as src, gzip.open(dest_path_temp, 'wb') as dst:
+                                # 边读边 Hash 边写
+                                import hashlib
+                                hasher = hashlib.md5()
+                                while True:
+                                    chunk = src.read(8192)
+                                    if not chunk:
+                                        break
+                                    hasher.update(chunk)
+                                    dst.write(chunk)
                                 
+                                # 获取原始大小
+                                original_size = zf.getinfo(member).file_size
+                                file_hash = hasher.hexdigest()
+
                         except RuntimeError as e:
                             # 密码相关错误可能表现为 RuntimeError
                             if "encrypted" in str(e) and not password:
@@ -134,18 +170,32 @@ class StorageService:
                         except zipfile.BadZipFile:
                             logger.error(f"Bad zip entry: {member}")
                             continue
-
-                        file_size = dest_path.stat().st_size
+                        
+                        # 物理去重
+                        final_filename = f"{file_hash}.rawdata.gz"
+                        final_path = raw_dir / final_filename
+                        deduplicated = False
+                        
+                        if final_path.exists():
+                             if dest_path_temp.exists():
+                                 dest_path_temp.unlink()
+                             deduplicated = True
+                             file_size = final_path.stat().st_size
+                        else:
+                             dest_path_temp.rename(final_path)
+                             file_size = final_path.stat().st_size
                         
                         results.append({
-                            "file_id": new_file_id,
+                            "file_id": new_file_id, # 仍生成一个 ID 用于 Session 里的临时引用，但最终 SensorFile ID 会根据 Hash 决定
                             "filename": Path(member).name,
                             "original_path_in_zip": member,
-                            "raw_path": str(dest_path),
+                            "raw_path": str(final_path),
                             "file_size": file_size,
-                            "original_size": original_size
+                            "original_size": original_size,
+                            "file_hash": file_hash,
+                            "deduplicated": deduplicated
                         })
-                        logger.info(f"Extracted from zip (streamed): {member} -> {new_file_id}")
+                        logger.info(f"Extracted zip entry {member} -> {file_hash} (Dedup: {deduplicated})")
                         
             except zipfile.BadZipFile as e:
                 logger.error(f"Bad zip file: {e}")
@@ -232,13 +282,26 @@ class StorageService:
         # 但秒传依赖 Hash 唯一性;我们假设 Hash 足够强 (MD5/SHA256);
         # 用户需求: storage/{x_original_hash}.zst
         zst_path = raw_dir / f"{file_hash}.zst"
+        deduplicated = False
+        if zst_path.exists():
+            # 已存在，假设完好 (可以加 Size 校验)
+            logger.info(f"Zst physical file exists: {zst_path}")
+            deduplicated = True
+            # 我们仍然计算 Hash 来校验上传的文件是否匹配 (Double Check)
+            # 或者如果是秒传，应该在上层拦截。
+            # 如果走到这里，说明是新上传，但 Hash 碰巧一样？或者强制覆盖？
+            # 这里的逻辑是存盘。如果文件已存在，我们可以跳过写入，但必须校验 Hash。
+            # 为了简单，我们每次都写入（覆盖），或者写临时文件校验后再覆盖。
+            # 鉴于 `StorageService` 应该只管存储，我们先写临时，校验通过后 rename/覆盖。
+        
+        temp_zst_path = raw_dir / f"temp_{file_hash}_{uuid.uuid4()}.zst"
         
         # 1. 保存 .zst 文件
         # 注意: 这一步只是暂存，如果校验失败需要删除
         # 但为了性能，直接写入目标位置
-        logger.info(f"Saving zst file to {zst_path}")
+        logger.info(f"Saving zst file to {temp_zst_path}")
         try:
-            with zst_path.open("wb") as buffer:
+            with temp_zst_path.open("wb") as buffer:
                 # 使用 copyfileobj 高效写入
                 await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
         except Exception as e:
@@ -252,7 +315,7 @@ class StorageService:
         hasher = hashlib.md5() 
         
         def _verify():
-            with zst_path.open('rb') as ifh:
+            with temp_zst_path.open('rb') as ifh:
                 with dctx.stream_reader(ifh) as reader:
                     while True:
                         chunk = reader.read(65536) # 64KB
@@ -266,19 +329,29 @@ class StorageService:
         except Exception as e:
             # 解压失败，可能是文件损坏
             logger.error(f"Zstd decompression failed: {e}")
-            if zst_path.exists():
-                zst_path.unlink()
+            if temp_zst_path.exists():
+                temp_zst_path.unlink()
             raise ValueError("Corrupted zstd file")
             
         logger.info(f"Expected: {file_hash}, Calculated: {calculated_hash}")
         
         if calculated_hash != file_hash:
             # 校验失败
-            if zst_path.exists():
-                zst_path.unlink()
+            if temp_zst_path.exists():
+                temp_zst_path.unlink()
             raise ValueError(f"Hash mismatch! Expected {file_hash} but got {calculated_hash}")
-            
+        
+        # 校验成功，移动到最终位置
+        if zst_path.exists():
+             if temp_zst_path.exists():
+                 temp_zst_path.unlink()
+             deduplicated = True
+        else:
+             temp_zst_path.rename(zst_path)
+             
         return {
             "raw_path": str(zst_path),
-            "file_size": zst_path.stat().st_size
+            "file_size": zst_path.stat().st_size,
+            "file_hash": file_hash,
+            "deduplicated": deduplicated
         }

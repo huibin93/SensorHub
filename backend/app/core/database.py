@@ -19,6 +19,8 @@ def init_db() -> None:
     创建所有 SQLModel 定义的表结构，并填充最基础的字典数据;
     应在应用启动时调用;
     """
+    # 确保模型已被导入以注册 metadata
+    from app.models.sensor_file import SensorFile, PhysicalFile
     SQLModel.metadata.create_all(engine)
     
     # 初始化最基础的字典数据

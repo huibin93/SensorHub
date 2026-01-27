@@ -5,7 +5,7 @@
 """
 from typing import List, Optional, Tuple
 from sqlmodel import Session, select, func, desc, or_
-from app.models.sensor_file import SensorFile
+from app.models.sensor_file import SensorFile, PhysicalFile
 
 
 def get_stats(session: Session) -> dict:
@@ -186,5 +186,28 @@ def get_file_by_hash(session: Session, file_hash: str) -> Optional[SensorFile]:
     Returns:
         Optional[SensorFile]: 文件对象，不存在时返回 None;
     """
-    return session.exec(select(SensorFile).where(SensorFile.hash == file_hash)).first()
+    return session.exec(select(SensorFile).where(SensorFile.file_hash == file_hash)).first()
 
+
+def get_physical_file(session: Session, file_hash: str) -> Optional[PhysicalFile]:
+    """
+    根据 Hash 获取物理文件;
+    """
+    return session.get(PhysicalFile, file_hash)
+
+
+def create_physical_file(session: Session, file: PhysicalFile) -> PhysicalFile:
+    """
+    创建物理文件记录;
+    """
+    session.add(file)
+    session.commit()
+    session.refresh(file)
+    return file
+
+
+def get_file_by_filename(session: Session, filename: str) -> Optional[SensorFile]:
+    """
+    根据文件名获取文件;
+    """
+    return session.exec(select(SensorFile).where(SensorFile.filename == filename)).first()
