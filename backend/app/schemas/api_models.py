@@ -1,7 +1,7 @@
 """
-API 数据模型模块。
+API 数据模型模块;
 
-本模块定义 API 请求和响应使用的 Pydantic 模型。
+本模块定义 API 请求和响应使用的 Pydantic 模型;
 """
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Any, Dict
@@ -11,7 +11,7 @@ from datetime import datetime
 # --- 统计相关 ---
 
 class StatsResponse(BaseModel):
-    """文件统计响应模型。"""
+    """文件统计响应模型;"""
     totalFiles: int
     todayUploads: int
     pendingTasks: int
@@ -23,9 +23,9 @@ class StatsResponse(BaseModel):
 
 class SensorFileResponse(BaseModel):
     """
-    传感器文件响应模型。
+    传感器文件响应模型;
 
-    用于 API 返回文件信息，支持从数据库模型自动转换。
+    用于 API 返回文件信息，支持从数据库模型自动转换;
     """
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -50,7 +50,7 @@ class SensorFileResponse(BaseModel):
 
 
 class PaginatedFilesResponse(BaseModel):
-    """分页文件列表响应模型。"""
+    """分页文件列表响应模型;"""
     items: List[SensorFileResponse]
     total: int
     page: int
@@ -59,7 +59,7 @@ class PaginatedFilesResponse(BaseModel):
 
 
 class FileUpdateRequest(BaseModel):
-    """文件更新请求模型。"""
+    """文件更新请求模型;"""
     notes: Optional[str] = None
     deviceType: Optional[str] = None
     deviceModel: Optional[str] = None
@@ -68,12 +68,12 @@ class FileUpdateRequest(BaseModel):
 
 
 class BatchDeleteRequest(BaseModel):
-    """批量删除请求模型。"""
+    """批量删除请求模型;"""
     ids: List[str]
 
 
 class UploadResponse(BaseModel):
-    """文件上传响应模型。"""
+    """文件上传响应模型;"""
     id: str
     filename: str
     status: str
@@ -81,51 +81,51 @@ class UploadResponse(BaseModel):
 
 
 class ParseRequest(BaseModel):
-    """文件解析请求模型。"""
+    """文件解析请求模型;"""
     options: Optional[dict] = None
 
 
 class BatchDownloadRequest(BaseModel):
-    """批量下载请求模型。"""
+    """批量下载请求模型;"""
     ids: List[str]
 
 
 # --- 配置/字典相关 ---
 
 class DeviceType(BaseModel):
-    """设备类型模型（包含型号列表）。"""
+    """设备类型模型(包含型号列表);"""
     type: str
     models: List[str]
 
 
 class DevicesResponse(BaseModel):
-    """设备列表响应模型。"""
+    """设备列表响应模型;"""
     devices: List[DeviceType]
 
 
 class AddDeviceModelRequest(BaseModel):
-    """添加设备型号请求模型。"""
+    """添加设备型号请求模型;"""
     deviceType: str
     modelName: str
 
 
 class TestType(BaseModel):
-    """测试类型模型（包含子类型列表）。"""
+    """测试类型模型(包含子类型列表);"""
     id: str
     name: str
     subTypes: List[str]
 
 
 class TestTypesResponse(BaseModel):
-    """测试类型列表响应模型。"""
+    """测试类型列表响应模型;"""
     types: List[TestType]
 
 
 class AddTestTypeRequest(BaseModel):
-    """添加测试类型请求模型。"""
+    """添加测试类型请求模型;"""
     name: str
 
 
 class AddSubTypeRequest(BaseModel):
-    """添加测试子类型请求模型。"""
+    """添加测试子类型请求模型;"""
     name: str

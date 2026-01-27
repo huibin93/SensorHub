@@ -1,7 +1,7 @@
 """
-文件相关 API 端点模块。
+文件相关 API 端点模块;
 
-本模块提供传感器文件的 CRUD 操作、上传、下载、解析等 API 端点。
+本模块提供传感器文件的 CRUD 操作、上传、下载、解析等 API 端点;
 """
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Header
 from pathlib import Path
@@ -25,10 +25,10 @@ router = APIRouter()
 @router.get("/stats", response_model=api_models.StatsResponse)
 def get_stats(session: Session = Depends(deps.get_db)) -> api_models.StatsResponse:
     """
-    获取文件统计信息。
+    获取文件统计信息;
 
     Returns:
-        StatsResponse: 包含文件总数、今日上传数等统计信息。
+        StatsResponse: 包含文件总数、今日上传数等统计信息;
     """
     return crud.get_stats(session)
 
@@ -44,18 +44,18 @@ def get_files(
     session: Session = Depends(deps.get_db)
 ) -> api_models.PaginatedFilesResponse:
     """
-    获取文件列表（分页）。
+    获取文件列表(分页);
 
     Args:
-        page: 页码，从 1 开始。
-        limit: 每页数量。
-        search: 搜索关键词（文件名或备注）。
-        device: 设备类型筛选。
-        status: 状态筛选。
-        sort: 排序字段，前缀 "-" 表示降序。
+        page: 页码，从 1 开始;
+        limit: 每页数量;
+        search: 搜索关键词(文件名或备注);
+        device: 设备类型筛选;
+        status: 状态筛选;
+        sort: 排序字段，前缀 "-" 表示降序;
 
     Returns:
-        PaginatedFilesResponse: 分页的文件列表。
+        PaginatedFilesResponse: 分页的文件列表;
     """
     try:
         skip = (page - 1) * limit
@@ -76,7 +76,7 @@ def get_files(
 @router.get("/files/check")
 def check_file(hash: str, session: Session = Depends(deps.get_db)):
     """
-    检查文件是否已存在（秒传）。
+    检查文件是否已存在(秒传);
     
     Args:
         hash: 文件 Hash (MD5).
@@ -99,7 +99,7 @@ async def upload_file(
     session: Session = Depends(deps.get_db)
 ) -> api_models.UploadResponse:
     """
-    上传传感器文件。支持普通上传和 Zstd 压缩上传（带用于校验的 Hash）。
+    上传传感器文件;支持普通上传和 Zstd 压缩上传(带用于校验的 Hash);
     """
     # 如果有 X-Original-Hash，走新流程
     if x_original_hash:
@@ -272,17 +272,17 @@ def update_file(
     session: Session = Depends(deps.get_db)
 ) -> SensorFile:
     """
-    更新文件信息。
+    更新文件信息;
 
     Args:
-        file_id: 文件 ID。
-        update: 要更新的字段。
+        file_id: 文件 ID;
+        update: 要更新的字段;
 
     Returns:
-        SensorFile: 更新后的文件对象。
+        SensorFile: 更新后的文件对象;
 
     Raises:
-        HTTPException: 文件不存在时抛出 404 错误。
+        HTTPException: 文件不存在时抛出 404 错误;
     """
     updated = crud.update_file(session, file_id, update.model_dump(exclude_unset=True))
     if not updated:
@@ -293,13 +293,13 @@ def update_file(
 @router.delete("/files/{file_id}")
 def delete_file(file_id: str, session: Session = Depends(deps.get_db)) -> dict:
     """
-    删除单个文件。
+    删除单个文件;
 
     Args:
-        file_id: 文件 ID。
+        file_id: 文件 ID;
 
     Returns:
-        dict: 删除结果。
+        dict: 删除结果;
     """
     crud.delete_file(session, file_id)
     StorageService.delete_file(file_id)
@@ -312,13 +312,13 @@ def batch_delete(
     session: Session = Depends(deps.get_db)
 ) -> dict:
     """
-    批量删除文件。
+    批量删除文件;
 
     Args:
-        request: 包含要删除的文件 ID 列表。
+        request: 包含要删除的文件 ID 列表;
 
     Returns:
-        dict: 删除结果，包含删除数量。
+        dict: 删除结果，包含删除数量;
     """
     for fid in request.ids:
         crud.delete_file(session, fid)
@@ -329,16 +329,16 @@ def batch_delete(
 @router.get("/files/{file_id}/structure")
 def get_structure(file_id: str, session: Session = Depends(deps.get_db)) -> dict:
     """
-    获取文件结构信息。
+    获取文件结构信息;
 
     Args:
-        file_id: 文件 ID。
+        file_id: 文件 ID;
 
     Returns:
-        dict: 文件结构元数据。
+        dict: 文件结构元数据;
 
     Raises:
-        HTTPException: 文件不存在时抛出 404 错误。
+        HTTPException: 文件不存在时抛出 404 错误;
     """
     file = crud.get_file(session, file_id)
     if not file:
@@ -360,19 +360,19 @@ def get_file_data(
     session: Session = Depends(deps.get_db)
 ) -> dict:
     """
-    获取文件解析后的数据。
+    获取文件解析后的数据;
 
     Args:
-        file_id: 文件 ID。
-        key: 数据键名（对应 Parquet 文件名）。
-        limit: 返回行数限制。
-        columns: 要返回的列名，逗号分隔。
+        file_id: 文件 ID;
+        key: 数据键名(对应 Parquet 文件名);
+        limit: 返回行数限制;
+        columns: 要返回的列名，逗号分隔;
 
     Returns:
-        dict: 包含数据数组的字典。
+        dict: 包含数据数组的字典;
 
     Raises:
-        HTTPException: 文件或数据不存在时抛出 404 错误。
+        HTTPException: 文件或数据不存在时抛出 404 错误;
     """
     file = crud.get_file(session, file_id)
     if not file:
@@ -411,16 +411,16 @@ def get_file_data(
 @router.get("/files/{file_id}/download")
 def download_file(file_id: str, session: Session = Depends(deps.get_db)):
     """
-    下载原始文件。
+    下载原始文件;
 
     Args:
-        file_id: 文件 ID。
+        file_id: 文件 ID;
 
     Returns:
-        FileResponse: 文件下载响应。
+        FileResponse: 文件下载响应;
 
     Raises:
-        HTTPException: 文件不存在时抛出 404 错误。
+        HTTPException: 文件不存在时抛出 404 错误;
     """
     from fastapi.responses import FileResponse
     file = crud.get_file(session, file_id)
@@ -444,13 +444,13 @@ def batch_download(
     session: Session = Depends(deps.get_db)
 ) -> dict:
     """
-    批量下载文件（待实现）。
+    批量下载文件(待实现);
 
     Args:
-        request: 包含要下载的文件 ID 列表。
+        request: 包含要下载的文件 ID 列表;
 
     Returns:
-        dict: 当前返回未实现状态。
+        dict: 当前返回未实现状态;
     """
     # TODO: 实现 ZIP 流式下载
     return {"status": "Not implemented in V1 refactor yet"}
@@ -463,17 +463,17 @@ def trigger_parse(
     session: Session = Depends(deps.get_db)
 ) -> dict:
     """
-    触发文件解析。
+    触发文件解析;
 
     Args:
-        file_id: 文件 ID。
-        request: 解析选项。
+        file_id: 文件 ID;
+        request: 解析选项;
 
     Returns:
-        dict: 解析状态。
+        dict: 解析状态;
 
     Raises:
-        HTTPException: 文件不存在时抛出 404 错误。
+        HTTPException: 文件不存在时抛出 404 错误;
     """
     file = crud.get_file(session, file_id)
     if not file:

@@ -1,8 +1,8 @@
 """
-FastAPI 应用入口模块。
+FastAPI 应用入口模块;
 
 本模块创建 FastAPI 应用实例，配置中间件和路由，
-并在启动时初始化数据库和种子数据。
+并在启动时初始化数据库和种子数据;
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,9 +31,9 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     """
-    应用启动事件处理器。
+    应用启动事件处理器;
 
-    初始化数据库表结构并填充种子数据。
+    初始化数据库表结构并填充种子数据;
     """
     init_db()
     with Session(engine) as session:
@@ -46,4 +46,4 @@ app.include_router(files.router, prefix=f"{settings.API_V1_STR}", tags=["files"]
 
 logger.info("Application startup complete.")
 
-# 可选：挂载静态文件存储（如需要）
+# 可选：挂载静态文件存储(如需要)

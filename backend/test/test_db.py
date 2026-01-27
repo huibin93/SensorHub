@@ -1,5 +1,5 @@
 """
-测试数据库初始化脚本。
+测试数据库初始化脚本;
 
 本脚本用于创建和初始化测试数据库 (test.db)，包括：
 1. 强制切换到测试数据库模式
@@ -27,12 +27,12 @@ settings.database.use_test_db = True
 
 def seed_mock_files(session: Session) -> None:
     """
-    向测试数据库插入模拟文件数据。
+    向测试数据库插入模拟文件数据;
 
-    仅在 sensor_files 表为空时执行插入，避免重复数据。
+    仅在 sensor_files 表为空时执行插入，避免重复数据;
 
     Args:
-        session: SQLModel 数据库会话对象。
+        session: SQLModel 数据库会话对象;
     """
     if session.exec(select(SensorFile)).first():
         logger.info("[test_db] Mock files already exist, skipping insertion")
@@ -82,7 +82,7 @@ def seed_mock_files(session: Session) -> None:
 
 def main() -> None:
     """
-    测试数据库初始化主函数。
+    测试数据库初始化主函数;
 
     执行以下步骤：
     1. 创建测试数据库引擎
@@ -105,7 +105,7 @@ def main() -> None:
         SQLModel.metadata.create_all(test_engine)
         logger.info("[test_db] Tables created")
 
-    # 填充数据（字典 + 模拟文件）
+    # 填充数据(字典 + 模拟文件)
     with Session(test_engine) as session:
         seed.seed_data(session)
         seed_mock_files(session)

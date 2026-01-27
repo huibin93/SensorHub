@@ -1,7 +1,7 @@
 """
-字典相关 API 端点模块。
+字典相关 API 端点模块;
 
-本模块提供设备型号和测试类型字典的查询和管理 API。
+本模块提供设备型号和测试类型字典的查询和管理 API;
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
@@ -16,10 +16,10 @@ router = APIRouter()
 @router.get("/devices", response_model=api_models.DevicesResponse)
 def get_devices(session: Session = Depends(deps.get_db)) -> api_models.DevicesResponse:
     """
-    获取所有设备型号列表。
+    获取所有设备型号列表;
 
     Returns:
-        DevicesResponse: 按设备类型分组的型号列表。
+        DevicesResponse: 按设备类型分组的型号列表;
     """
     models = session.exec(select(DeviceModel)).all()
 
@@ -45,16 +45,16 @@ def add_device_model(
     session: Session = Depends(deps.get_db)
 ) -> dict:
     """
-    添加新设备型号。
+    添加新设备型号;
 
     Args:
-        req: 包含设备类型和型号名称。
+        req: 包含设备类型和型号名称;
 
     Returns:
-        dict: 添加结果。
+        dict: 添加结果;
 
     Raises:
-        HTTPException: 型号已存在时抛出 400 错误。
+        HTTPException: 型号已存在时抛出 400 错误;
     """
     # 检查是否已存在
     existing = session.exec(select(DeviceModel).where(
@@ -74,10 +74,10 @@ def add_device_model(
 @router.get("/test-types", response_model=api_models.TestTypesResponse)
 def get_test_types(session: Session = Depends(deps.get_db)) -> api_models.TestTypesResponse:
     """
-    获取所有测试类型列表。
+    获取所有测试类型列表;
 
     Returns:
-        TestTypesResponse: 包含主类型和子类型的列表。
+        TestTypesResponse: 包含主类型和子类型的列表;
     """
     types = session.exec(select(TestType)).all()
     result = []
@@ -105,16 +105,16 @@ def add_test_type(
     session: Session = Depends(deps.get_db)
 ) -> dict:
     """
-    添加新测试类型。
+    添加新测试类型;
 
     Args:
-        req: 包含测试类型名称。
+        req: 包含测试类型名称;
 
     Returns:
-        dict: 添加结果，包含新创建的测试类型信息。
+        dict: 添加结果，包含新创建的测试类型信息;
 
     Raises:
-        HTTPException: 类型已存在时抛出 400 错误。
+        HTTPException: 类型已存在时抛出 400 错误;
     """
     type_id = req.name  # 简单的 ID 生成
     if session.get(TestType, type_id):
@@ -137,17 +137,17 @@ def add_sub_type(
     session: Session = Depends(deps.get_db)
 ) -> dict:
     """
-    添加测试子类型。
+    添加测试子类型;
 
     Args:
-        type_id: 父测试类型 ID。
-        req: 包含子类型名称。
+        type_id: 父测试类型 ID;
+        req: 包含子类型名称;
 
     Returns:
-        dict: 添加结果。
+        dict: 添加结果;
 
     Raises:
-        HTTPException: 父类型不存在时抛出 404 错误，子类型已存在时抛出 400 错误。
+        HTTPException: 父类型不存在时抛出 404 错误，子类型已存在时抛出 400 错误;
     """
     if not session.get(TestType, type_id):
         raise HTTPException(status_code=404, detail="Type not found")

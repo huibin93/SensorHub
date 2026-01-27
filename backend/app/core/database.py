@@ -1,8 +1,8 @@
 """
-数据库模块。
+数据库模块;
 
-本模块负责创建数据库引擎、初始化表结构，并提供数据库会话生成器。
-初始化时会填充最基础的字典数据。
+本模块负责创建数据库引擎、初始化表结构，并提供数据库会话生成器;
+初始化时会填充最基础的字典数据;
 """
 from sqlmodel import SQLModel, create_engine, Session, select
 from app.core.config import settings
@@ -14,10 +14,10 @@ engine = create_engine(settings.SQLITE_URL, echo=settings.database.echo)
 
 def init_db() -> None:
     """
-    初始化数据库。
+    初始化数据库;
 
-    创建所有 SQLModel 定义的表结构，并填充最基础的字典数据。
-    应在应用启动时调用。
+    创建所有 SQLModel 定义的表结构，并填充最基础的字典数据;
+    应在应用启动时调用;
     """
     SQLModel.metadata.create_all(engine)
     
@@ -27,12 +27,12 @@ def init_db() -> None:
 
 def _init_base_data() -> None:
     """
-    初始化最基础的字典数据。
+    初始化最基础的字典数据;
 
     仅在表为空时填充：
     - TestType: 'unknown' 类型
     
-    DeviceType 和 DeviceModel 由前端添加或解析时自动创建。
+    DeviceType 和 DeviceModel 由前端添加或解析时自动创建;
     """
     from app.models.dictionary import TestType, TestSubType
     
@@ -47,10 +47,10 @@ def _init_base_data() -> None:
 
 def get_session():
     """
-    获取数据库会话生成器。
+    获取数据库会话生成器;
 
     Yields:
-        Session: SQLModel 数据库会话对象。
+        Session: SQLModel 数据库会话对象;
     """
     with Session(engine) as session:
         yield session

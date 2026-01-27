@@ -1,7 +1,7 @@
 """
-文件存储服务模块。
+文件存储服务模块;
 
-本模块提供文件上传、存储和删除的相关功能。
+本模块提供文件上传、存储和删除的相关功能;
 """
 import gzip
 import shutil
@@ -17,20 +17,20 @@ from app.core.logger import logger
 
 class StorageService:
     """
-    文件存储服务。
+    文件存储服务;
 
-    负责管理原始文件和处理后文件的存储。
+    负责管理原始文件和处理后文件的存储;
     """
 
     @staticmethod
     def get_raw_dir() -> Path:
-        """获取原始文件存储目录。"""
+        """获取原始文件存储目录;"""
         settings.RAW_DIR.mkdir(parents=True, exist_ok=True)
         return settings.RAW_DIR
 
     @staticmethod
     def get_processed_dir(file_id: str) -> Path:
-        """获取处理后文件的存储目录。"""
+        """获取处理后文件的存储目录;"""
         path = settings.PROCESSED_DIR / file_id
         path.mkdir(parents=True, exist_ok=True)
         return path
@@ -38,14 +38,14 @@ class StorageService:
     @staticmethod
     async def save_rawdata_file(file: UploadFile, file_id: str) -> Dict[str, Any]:
         """
-        流式 gzip 压缩保存 .rawdata 文件。
+        流式 gzip 压缩保存 .rawdata 文件;
 
         Args:
-            file: 上传文件对象。
-            file_id: 文件 ID。
+            file: 上传文件对象;
+            file_id: 文件 ID;
 
         Returns:
-            Dict: 包含 raw_path 的存储结果。
+            Dict: 包含 raw_path 的存储结果;
         """
         raw_dir = StorageService.get_raw_dir()
         # 保存为 file_id.rawdata.gz
@@ -72,13 +72,13 @@ class StorageService:
     async def save_zip_file(file: UploadFile) -> List[Dict[str, Any]]:
         logger.info("### EXECUTING NEW SAVE_ZIP_FILE LOGIC ###")
         """
-        保存 .zip 文件: 解压并独立处理每个 .rawdata 文件。
+        保存 .zip 文件: 解压并独立处理每个 .rawdata 文件;
         
         Args:
-            file: 上传的 zip 文件。
+            file: 上传的 zip 文件;
             
         Returns:
-            List[Dict]: 处理成功的文件列表,每个元素包含 file_id, raw_path 等信息。
+            List[Dict]: 处理成功的文件列表,每个元素包含 file_id, raw_path 等信息;
         """
         raw_dir = StorageService.get_raw_dir()
         temp_id = str(uuid.uuid4())
@@ -166,14 +166,14 @@ class StorageService:
     @staticmethod
     async def save_upload_file(file: UploadFile, file_id: str) -> Dict[str, Any]:
         """
-        根据文件类型选择保存策略。
+        根据文件类型选择保存策略;
 
         Args:
-            file: FastAPI 上传文件对象。
-            file_id: 文件 ID。
+            file: FastAPI 上传文件对象;
+            file_id: 文件 ID;
 
         Returns:
-            Dict: 存储结果。
+            Dict: 存储结果;
         """
         filename = file.filename or ""
         ext = Path(filename).suffix.lower()
@@ -188,10 +188,10 @@ class StorageService:
     @staticmethod
     def delete_file(file_id: str) -> None:
         """
-        删除文件的原始数据和处理后数据。
+        删除文件的原始数据和处理后数据;
 
         Args:
-            file_id: 文件 ID。
+            file_id: 文件 ID;
         """
         raw_dir = settings.RAW_DIR
         
@@ -211,14 +211,14 @@ class StorageService:
     @staticmethod
     async def verify_and_save_zstd(file: UploadFile, file_hash: str) -> Dict[str, Any]:
         """
-        保存并校验 Zstd 压缩文件。
+        保存并校验 Zstd 压缩文件;
         
         Args:
-            file: 上传的 .zst 文件流。
-            file_hash: 前端计算的原始文件 Hash (Expectation)。
+            file: 上传的 .zst 文件流;
+            file_hash: 前端计算的原始文件 Hash (Expectation);
             
         Returns:
-            Dict: 存储结果 (如果有错误则抛出异常)。
+            Dict: 存储结果 (如果有错误则抛出异常);
         """
         import zstandard as zstd
         import hashlib
@@ -226,10 +226,10 @@ class StorageService:
         raw_dir = StorageService.get_raw_dir()
         # 命名规则: {hash}.zst
         # 注意: 如果不同用户传相同文件，hash相同，会覆盖还是复用？
-        # 秒传逻辑下，如果Hash已存在，通常不再调 Upload。
-        # 如果Hash不存在，这里保存。
+        # 秒传逻辑下，如果Hash已存在，通常不再调 Upload;
+        # 如果Hash不存在，这里保存;
         # 为了避免文件名冲突(万一不同内容Hash碰撞? MD5有可能)，可以加UUID?
-        # 但秒传依赖 Hash 唯一性。我们假设 Hash 足够强 (MD5/SHA256)。
+        # 但秒传依赖 Hash 唯一性;我们假设 Hash 足够强 (MD5/SHA256);
         # 用户需求: storage/{x_original_hash}.zst
         zst_path = raw_dir / f"{file_hash}.zst"
         
@@ -248,7 +248,7 @@ class StorageService:
         # 2. 边解压边计算 Hash
         logger.info("Verifying zst integrity...")
         dctx = zstd.ZstdDecompressor()
-        # 根据前端 SparkMD5，这里也用 MD5。如果未来改前端，这里必须同步。
+        # 根据前端 SparkMD5，这里也用 MD5;如果未来改前端，这里必须同步;
         hasher = hashlib.md5() 
         
         def _verify():

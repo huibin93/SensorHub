@@ -1,7 +1,7 @@
 """
-文件 CRUD 操作模块。
+文件 CRUD 操作模块;
 
-本模块提供传感器文件的数据库增删改查操作。
+本模块提供传感器文件的数据库增删改查操作;
 """
 from typing import List, Optional, Tuple
 from sqlmodel import Session, select, func, desc, or_
@@ -10,13 +10,13 @@ from app.models.sensor_file import SensorFile
 
 def get_stats(session: Session) -> dict:
     """
-    获取文件统计信息。
+    获取文件统计信息;
 
     Args:
-        session: 数据库会话。
+        session: 数据库会话;
 
     Returns:
-        dict: 包含文件总数等统计信息。
+        dict: 包含文件总数等统计信息;
     """
     total_files = session.exec(select(func.count(SensorFile.id))).one()
     return {
@@ -38,19 +38,19 @@ def get_files(
     sort: str = "-uploadTime"
 ) -> Tuple[List[SensorFile], int]:
     """
-    获取文件列表（支持分页、搜索、筛选、排序）。
+    获取文件列表(支持分页、搜索、筛选、排序);
 
     Args:
-        session: 数据库会话。
-        skip: 跳过的记录数（分页偏移）。
-        limit: 返回的最大记录数。
-        search: 搜索关键词。
-        device: 设备类型筛选。
-        status: 状态筛选。
-        sort: 排序字段，前缀 "-" 表示降序。
+        session: 数据库会话;
+        skip: 跳过的记录数(分页偏移);
+        limit: 返回的最大记录数;
+        search: 搜索关键词;
+        device: 设备类型筛选;
+        status: 状态筛选;
+        sort: 排序字段，前缀 "-" 表示降序;
 
     Returns:
-        Tuple[List[SensorFile], int]: 文件列表和总数。
+        Tuple[List[SensorFile], int]: 文件列表和总数;
     """
     query = select(SensorFile)
 
@@ -107,28 +107,28 @@ def get_files(
 
 def get_file(session: Session, file_id: str) -> Optional[SensorFile]:
     """
-    根据 ID 获取单个文件。
+    根据 ID 获取单个文件;
 
     Args:
-        session: 数据库会话。
-        file_id: 文件 ID。
+        session: 数据库会话;
+        file_id: 文件 ID;
 
     Returns:
-        Optional[SensorFile]: 文件对象，不存在时返回 None。
+        Optional[SensorFile]: 文件对象，不存在时返回 None;
     """
     return session.get(SensorFile, file_id)
 
 
 def create_file(session: Session, file: SensorFile) -> SensorFile:
     """
-    创建新文件记录。
+    创建新文件记录;
 
     Args:
-        session: 数据库会话。
-        file: 文件对象。
+        session: 数据库会话;
+        file: 文件对象;
 
     Returns:
-        SensorFile: 创建后的文件对象。
+        SensorFile: 创建后的文件对象;
     """
     session.add(file)
     session.commit()
@@ -138,15 +138,15 @@ def create_file(session: Session, file: SensorFile) -> SensorFile:
 
 def update_file(session: Session, file_id: str, updates: dict) -> Optional[SensorFile]:
     """
-    更新文件记录。
+    更新文件记录;
 
     Args:
-        session: 数据库会话。
-        file_id: 文件 ID。
-        updates: 要更新的字段字典。
+        session: 数据库会话;
+        file_id: 文件 ID;
+        updates: 要更新的字段字典;
 
     Returns:
-        Optional[SensorFile]: 更新后的文件对象，文件不存在时返回 None。
+        Optional[SensorFile]: 更新后的文件对象，文件不存在时返回 None;
     """
     file = session.get(SensorFile, file_id)
     if not file:
@@ -163,11 +163,11 @@ def update_file(session: Session, file_id: str, updates: dict) -> Optional[Senso
 
 def delete_file(session: Session, file_id: str) -> None:
     """
-    删除文件记录。
+    删除文件记录;
 
     Args:
-        session: 数据库会话。
-        file_id: 文件 ID。
+        session: 数据库会话;
+        file_id: 文件 ID;
     """
     file = session.get(SensorFile, file_id)
     if file:
@@ -177,14 +177,14 @@ def delete_file(session: Session, file_id: str) -> None:
 
 def get_file_by_hash(session: Session, file_hash: str) -> Optional[SensorFile]:
     """
-    根据 Hash 获取文件。
+    根据 Hash 获取文件;
 
     Args:
-        session: 数据库会话。
-        file_hash: 文件 Hash。
+        session: 数据库会话;
+        file_hash: 文件 Hash;
 
     Returns:
-        Optional[SensorFile]: 文件对象，不存在时返回 None。
+        Optional[SensorFile]: 文件对象，不存在时返回 None;
     """
     return session.exec(select(SensorFile).where(SensorFile.hash == file_hash)).first()
 
