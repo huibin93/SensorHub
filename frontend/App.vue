@@ -34,7 +34,7 @@ const handleFileUpload = (files: FileList) => {
             <!-- Section 3: Data Table Area -->
             <section class="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
                 <div class="flex items-center justify-between px-1 shrink-0">
-                <h2 class="text-lg font-bold text-slate-700 tracking-tight">Recent Data Files</h2>
+                <h2 class="text-lg font-bold text-slate-700 tracking-tight">Data Files</h2>
                 <div class="flex gap-2">
                     <!-- Optional Top Actions -->
                 </div>

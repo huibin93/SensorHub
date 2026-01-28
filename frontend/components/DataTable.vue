@@ -78,12 +78,21 @@ const handleBatchDownload = () => {
 };
 
 const handleBatchDelete = () => {
+    const count = selectedIds.value.size;
+    if (count === 0) return;
+    
+    if (!window.confirm(`Are you sure you want to delete ${count} selected file(s)?`)) return;
+
     const idsToDelete = Array.from(selectedIds.value);
     fileStore.deleteFiles(idsToDelete);
     selectedIds.value = new Set();
 };
 
 const deleteRow = (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this file?')) {
+        activeRowMenu.value = null;
+        return;
+    }
     fileStore.deleteFile(id);
     activeRowMenu.value = null;
 };
