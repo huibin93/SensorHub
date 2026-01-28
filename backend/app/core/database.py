@@ -1,7 +1,7 @@
 """
 数据库模块;
 
-本模块负责创建数据库引擎、初始化表结构，并提供数据库会话生成器;
+本模块负责创建数据库引擎、初始化表结构,并提供数据库会话生成器;
 初始化时会填充最基础的字典数据;
 """
 from sqlmodel import SQLModel, create_engine, Session, select
@@ -16,11 +16,12 @@ def init_db() -> None:
     """
     初始化数据库;
 
-    创建所有 SQLModel 定义的表结构，并填充最基础的字典数据;
+    创建所有 SQLModel 定义的表结构,并填充最基础的字典数据;
     应在应用启动时调用;
     """
     # 确保模型已被导入以注册 metadata
     from app.models.sensor_file import SensorFile, PhysicalFile
+    from app.models.dictionary import TestType, TestSubType
     SQLModel.metadata.create_all(engine)
     
     # 初始化最基础的字典数据

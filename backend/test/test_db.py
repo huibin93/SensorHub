@@ -1,7 +1,7 @@
 """
 测试数据库初始化脚本;
 
-本脚本用于创建和初始化测试数据库 (test.db)，包括：
+本脚本用于创建和初始化测试数据库 (test.db),包括：
 1. 强制切换到测试数据库模式
 2. 创建数据库表结构
 3. 填充字典数据和模拟测试文件数据
@@ -29,7 +29,7 @@ def seed_mock_files(session: Session) -> None:
     """
     向测试数据库插入模拟文件数据;
 
-    仅在 sensor_files 表为空时执行插入，避免重复数据;
+    仅在 sensor_files 表为空时执行插入,避免重复数据;
 
     Args:
         session: SQLModel 数据库会话对象;
@@ -86,7 +86,7 @@ def main() -> None:
 
     执行以下步骤：
     1. 创建测试数据库引擎
-    2. 如果数据库不存在，创建表结构
+    2. 如果数据库不存在,创建表结构
     3. 填充字典数据和模拟文件数据
     """
     logger.info(f"[test_db] Target DB URL: {settings.SQLITE_URL}")

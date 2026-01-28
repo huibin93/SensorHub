@@ -25,7 +25,7 @@ class SensorFileResponse(BaseModel):
     """
     传感器文件响应模型;
 
-    用于 API 返回文件信息，支持从数据库模型自动转换;
+    用于 API 返回文件信息,支持从数据库模型自动转换;
     """
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -40,13 +40,18 @@ class SensorFileResponse(BaseModel):
     testTypeL2: str = Field(validation_alias="test_type_l2")
     notes: str
     uploadTime: str = Field(validation_alias="upload_time")
-    packets: Any  # 数据库存储为字符串，前端期望数组
+    packets: Any  # 数据库存储为字符串,前端期望数组
 
     errorMessage: Optional[str] = Field(None, validation_alias="error_message")
     progress: Optional[int] = None
     contentMeta: Optional[dict] = Field(None, validation_alias="content_meta")
     rawPath: Optional[str] = Field(None, validation_alias="raw_path")
+    progress: Optional[int] = None
+    contentMeta: Optional[dict] = Field(None, validation_alias="content_meta")
+    rawPath: Optional[str] = Field(None, validation_alias="raw_path")
     processedDir: Optional[str] = Field(None, validation_alias="processed_dir")
+    
+    nameSuffix: Optional[str] = Field(None, validation_alias="name_suffix")
 
 
 class PaginatedFilesResponse(BaseModel):

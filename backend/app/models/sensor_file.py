@@ -12,11 +12,11 @@ from sqlalchemy import Column, JSON
 class PhysicalFile(SQLModel, table=True):
     """
     物理存储表;
-    核心职责：去重。只要 Hash 相同，硬盘上只存一份，数据库里只有这一行。
+    核心职责：去重。只要 Hash 相同,硬盘上只存一份,数据库里只有这一行。
     """
     __tablename__ = "physical_files"
 
-    hash: str = Field(primary_key=True, index=True, description="文件的 MD5/SHA256，绝对唯一的主键")
+    hash: str = Field(primary_key=True, index=True, description="文件的 MD5/SHA256,绝对唯一的主键")
     size: int = Field(description="文件大小(Bytes)")
     path: str = Field(description="Zstd 压缩文件在磁盘/S3 上的物理路径")
     
@@ -38,7 +38,7 @@ class SensorFile(SQLModel, table=True):
         file_hash: 关联的物理文件 Hash;
         filename: 原始文件名;
         device_type: 设备类型(Watch/Ring);
-        status: 处理状态(Idle/Processed/Failed);
+        status: 处理状态(unverified/verified/error/processing/processed);
         size: 文件大小(显示用字符串);
         duration: 记录时长;
         device_model: 设备型号;
@@ -61,11 +61,17 @@ class SensorFile(SQLModel, table=True):
     
     filename: str
     device_type: str = Field(alias="deviceType")
-    status: str = Field(default="Idle")
+    status: str = Field(default="unverified")
     
-    # 这里的 size 仍保留作为显示用的字符串 (例如 "1.2 MB")，
-    # 虽然物理大小在 PhysicalFile 中，但为了前端展示方便，保留快照。
+    # 这里的 size 仍保留作为显示用的字符串 (例如 "1.2 MB"),
+    # 虽然物理大小在 PhysicalFile 中,但为了前端展示方便,保留快照。
     size: str 
+    
+    # Phase 5.5 新增: 记录文件字节数，用于快速去重 (无需计算 Hash)
+    file_size_bytes: int = Field(default=0, description="文件原始字节大小")
+    
+    # Phase 5.6 新增: 文件名重复时的后缀 (例如 " (1)")
+    name_suffix: str = Field(default="", description="文件名重复时的后缀", alias="nameSuffix")
     
     duration: str = Field(default="--")
     device_model: str = Field(alias="deviceModel")
@@ -81,7 +87,7 @@ class SensorFile(SQLModel, table=True):
 
     # Phase 5 新增字段
     content_meta: Optional[dict] = Field(default={}, sa_column=Column(JSON))
-    # raw_path 已移除，通过 PhysicalFile 获取
+    # raw_path 已移除,通过 PhysicalFile 获取
     processed_dir: Optional[str] = Field(default=None, alias="processedDir")
     
     # 关系属性

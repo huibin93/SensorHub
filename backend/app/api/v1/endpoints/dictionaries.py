@@ -111,7 +111,7 @@ def add_test_type(
         req: 包含测试类型名称;
 
     Returns:
-        dict: 添加结果，包含新创建的测试类型信息;
+        dict: 添加结果,包含新创建的测试类型信息;
 
     Raises:
         HTTPException: 类型已存在时抛出 400 错误;
@@ -147,7 +147,7 @@ def add_sub_type(
         dict: 添加结果;
 
     Raises:
-        HTTPException: 父类型不存在时抛出 404 错误，子类型已存在时抛出 400 错误;
+        HTTPException: 父类型不存在时抛出 404 错误,子类型已存在时抛出 400 错误;
     """
     if not session.get(TestType, type_id):
         raise HTTPException(status_code=404, detail="Type not found")

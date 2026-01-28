@@ -9,8 +9,8 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@types/jszip": "^3.4.0",
     "@types/node": "^22.14.0",
+    "@types/streamsaver": "^2.0.5",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-vue": "^6.0.3",
     "typescript": "~5.8.2",
@@ -18,11 +18,13 @@
   },
   "dependencies": {
     "@bokuweb/zstd-wasm": "^0.0.27",
+    "@zip.js/zip.js": "^2.8.15",
     "axios": "^1.13.2",
-    "jszip": "^3.10.1",
+    "fzstd": "^0.1.1",
     "lucide-vue-next": "^0.562.0",
     "pinia": "^3.0.4",
     "spark-md5": "^3.0.2",
+    "streamsaver": "^2.0.6",
     "uuid": "^13.0.0",
     "vue": "^3.5.27"
   }

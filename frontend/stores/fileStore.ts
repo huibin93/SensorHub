@@ -21,7 +21,7 @@ export const useFileStore = defineStore('files', () => {
     const stats = computed(() => ({
         ...statsData.value,
         totalFiles: files.value.length > 0 ? files.value.length : statsData.value.totalFiles,
-        pendingTasks: files.value.filter(f => f.status === FileStatus.Processing || f.status === FileStatus.Idle).length,
+        pendingTasks: files.value.filter(f => f.status === FileStatus.Processing || f.status === FileStatus.Unverified).length,
     }));
 
     // ===== ACTIONS =====
@@ -62,6 +62,25 @@ export const useFileStore = defineStore('files', () => {
             console.error('[FileStore] Error fetching files:', e);
         } finally {
             isLoading.value = false;
+        }
+
+        // Auto-poll if any file is unverified
+        checkPolling();
+    }
+
+    /**
+     * Poll keys for unverified files
+     */
+    let pollTimeout: number | undefined;
+    function checkPolling() {
+        if (pollTimeout) clearTimeout(pollTimeout);
+
+        const hasUnverified = files.value.some(f => f.status === FileStatus.Unverified);
+        if (hasUnverified) {
+            console.log('[FileStore] Polling for verification...');
+            pollTimeout = window.setTimeout(() => {
+                fetchFiles(); // Re-fetch
+            }, 3000);
         }
     }
 
@@ -184,7 +203,7 @@ export const useFileStore = defineStore('files', () => {
                     const response = await fileService.getFiles({ page: 1, limit: 1000 });
                     const updatedFile = response.items.find(f => f.id === id);
 
-                    if (updatedFile && updatedFile.status === 'Processed') {
+                    if (updatedFile && updatedFile.status === FileStatus.Processed) {
                         clearInterval(pollInterval);
                         const localFile = files.value.find(f => f.id === id);
                         if (localFile) {
@@ -240,6 +259,41 @@ export const useFileStore = defineStore('files', () => {
         }
     }
 
+    /**
+     * Download single file
+     */
+    async function downloadFile(id: string, filename: string) {
+        console.log('[FileStore] Downloading file:', id, filename);
+        try {
+            await fileService.downloadFile(id, filename);
+        } catch (e) {
+            console.error('[FileStore] Failed to download file:', e);
+            error.value = 'File download failed';
+        }
+    }
+
+    /**
+     * Batch download files
+     */
+    async function batchDownload(ids: string[]) {
+        console.log('[FileStore] Batch downloading files:', ids.length);
+
+        const selectedFiles = files.value
+            .filter(f => ids.includes(f.id))
+            .map(f => ({
+                id: f.id,
+                filename: f.filename,
+                nameSuffix: f.nameSuffix
+            }));
+
+        try {
+            await fileService.batchDownload(selectedFiles);
+        } catch (e) {
+            console.error('[FileStore] Failed to batch download:', e);
+            error.value = 'Batch download failed';
+        }
+    }
+
     return {
         // State
         files,
@@ -256,5 +310,7 @@ export const useFileStore = defineStore('files', () => {
         triggerParse,
         deleteFiles,
         deleteFile,
+        downloadFile,
+        batchDownload,
     };
 });

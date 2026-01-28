@@ -8,6 +8,9 @@
 import axios from 'axios';
 import { SensorFile, DeviceType, FileStatus } from '../types';
 import { MOCK_FILES } from '../constants';
+import { Decompress } from 'fzstd';
+import streamSaver from 'streamsaver';
+import { ZipWriter } from '@zip.js/zip.js';
 
 // ===== CONFIGURATION (from .env) =====
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
@@ -193,7 +196,7 @@ export const fileService = {
         if (USE_MOCK) {
             return {
                 fileId: id,
-                status: 'Idle',
+                status: 'unverified',
                 processedDir: null,
                 contentMeta: {}
             };
@@ -231,31 +234,206 @@ export const fileService = {
     },
 
     /**
-     * Download a single file as ZIP
+     * Helper to trigger browser download
      */
-    downloadFile(id: string): void {
-        window.open(`${API_BASE_URL}/files/${id}/download`, '_blank');
-    },
-
-    /**
-     * Batch download multiple files as ZIP
-     */
-    async batchDownload(ids: string[]): Promise<void> {
-        const response = await axios.post(
-            `${API_BASE_URL}/files/batch-download`,
-            { ids },
-            { responseType: 'blob' }
-        );
-
-        // Create download link
-        const url = window.URL.createObjectURL(new Blob([response.data]));
+    triggerDownload(blob: Blob, filename: string) {
+        const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.setAttribute('download', 'batch_download.zip');
+        link.setAttribute('download', filename);
         document.body.appendChild(link);
         link.click();
         link.remove();
         window.URL.revokeObjectURL(url);
+    },
+
+    /**
+     * Download a single file (Stream Decompress Zst on client)
+     */
+    async downloadFile(id: string, filename: string): Promise<void> {
+        if (USE_MOCK) {
+            console.log('[FileService] Mock download:', id);
+            return;
+        }
+
+        let writer: WritableStreamDefaultWriter | undefined;
+        const startTime = performance.now();
+
+        try {
+            console.log(`[Download] Starting stream for file ID: ${id}, Filename: ${filename}`);
+
+            // 1. Setup Stream Saver IMMEDIATELLY (User Request: Pop up save dialog first)
+            console.log(`[Download] [${Math.round(performance.now() - startTime)}ms] Initializing StreamSaver...`);
+            const fileStream = streamSaver.createWriteStream(filename);
+            writer = fileStream.getWriter();
+
+            // 2. Fetch .zst stream
+            console.log(`[Download] [${Math.round(performance.now() - startTime)}ms] Fetching stream from backend...`);
+            const response = await fetch(`${API_BASE_URL}/files/${id}/download`);
+            if (!response.ok || !response.body) {
+                if (writer) {
+                    writer.abort(); // Abort the streamSaver writer if fetch fails
+                }
+                throw new Error(`Download failed: ${response.statusText}`);
+            }
+            console.log(`[Download] [${Math.round(performance.now() - startTime)}ms] Stream received. Content-Length: ${response.headers.get('content-length') || 'unknown'}`);
+
+            // 3. Decompress & Pipe
+            // Custom TransformStream for fzstd
+            console.log(`[Download] [${Math.round(performance.now() - startTime)}ms] Starting Decompression Pipeline...`);
+            let decoder: Decompress;
+
+            const decompressStream = new TransformStream({
+                start(controller) {
+                    decoder = new Decompress((chunk) => {
+                        controller.enqueue(chunk);
+                    });
+                },
+                transform(chunk) {
+                    // chunk is Uint8Array
+                    decoder.push(chunk as Uint8Array);
+                },
+                flush() {
+                    decoder.push(new Uint8Array(0), true);
+                }
+            });
+
+            const decompressedStream = new Response(
+                response.body.pipeThrough(decompressStream)
+            ).body;
+
+            if (!decompressedStream) {
+                throw new Error('Decompression stream failed to initialize');
+            }
+
+            const reader = decompressedStream.getReader();
+            let receivedLength = 0;
+
+            const pump = async () => {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        writer.close();
+                        break;
+                    }
+                    receivedLength += value.length;
+                    await writer.write(value);
+                }
+            };
+
+            console.log(`[Download] [${Math.round(performance.now() - startTime)}ms] Pipe active. Writing to disk...`);
+            await pump();
+            const totalTime = performance.now() - startTime;
+            console.log(`[Download] Complete: ${filename}. Total bytes written: ${receivedLength}. Duration: ${Math.round(totalTime)}ms. Avg Speed: ${Math.round(receivedLength / 1024 / (totalTime / 1000))} KB/s`);
+
+        } catch (e) {
+            console.error(`[Download] Failed for ${filename}:`, e);
+            if (writer) {
+                writer.abort(e).catch(() => { });
+            }
+            throw e;
+        }
+    },
+
+    /**
+     * Batch download multiple files as ZIP (Client-side Streaming)
+     */
+    async batchDownload(files: { id: string; filename: string; nameSuffix?: string }[]): Promise<void> {
+        if (USE_MOCK) return;
+        const totalStartTime = performance.now();
+
+        try {
+            console.log(`[BatchDownload] Starting batch download for ${files.length} files.`);
+
+            // 1. Setup Stream Saver for the ZIP file
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const zipFilename = `sensorhub_batch_${timestamp}.zip`;
+
+            console.log(`[BatchDownload] [${Math.round(performance.now() - totalStartTime)}ms] Initializing ZIP stream: ${zipFilename}`);
+            const fileStream = streamSaver.createWriteStream(zipFilename);
+
+            // 2. Setup ZipWriter
+            // ZipWriter writes to the streamSaver writable stream
+            const zipWriter = new ZipWriter(fileStream);
+
+            // 3. Process each file sequentially
+            let processedCount = 0;
+            for (const file of files) {
+                const fileStartTime = performance.now();
+                processedCount++;
+
+                // Construct filename logic (mirroring previous backend logic or UI logic)
+                let name = file.filename;
+                if (file.nameSuffix) {
+                    if (name.toLowerCase().endsWith('.rawdata')) {
+                        name = name.slice(0, -8) + file.nameSuffix + '.rawdata';
+                    } else {
+                        name = name + file.nameSuffix;
+                    }
+                }
+
+                console.log(`[BatchDownload] [${processedCount}/${files.length}] Processing: ${name} (ID: ${file.id})`);
+
+                try {
+                    // Fetch .zst stream
+                    const response = await fetch(`${API_BASE_URL}/files/${file.id}/download`);
+                    if (!response.ok || !response.body) {
+                        throw new Error(`Failed to fetch ${name}: ${response.statusText}`);
+                    }
+
+                    // Create Decompress Transform Stream
+                    let decoder: Decompress;
+                    const decompressStream = new TransformStream({
+                        start(controller) {
+                            decoder = new Decompress((chunk) => {
+                                controller.enqueue(chunk);
+                            });
+                        },
+                        transform(chunk) {
+                            decoder.push(chunk as Uint8Array);
+                        },
+                        flush() {
+                            decoder.push(new Uint8Array(0), true);
+                        }
+                    });
+
+                    // Pipe response body through decompressor
+                    // We get a ReadableStream of decompressed data
+                    const decompressedReadable = new Response(
+                        response.body.pipeThrough(decompressStream)
+                    ).body;
+
+                    if (!decompressedReadable) {
+                        throw new Error('Decompression stream failed');
+                    }
+
+                    // Add to ZIP
+                    // ZipWriter.add accepts a ReadableStream directly
+                    await zipWriter.add(name, decompressedReadable);
+                    const fileTime = performance.now() - fileStartTime;
+                    console.log(`[BatchDownload] [${processedCount}/${files.length}] Added to ZIP: ${name}. Duration: ${Math.round(fileTime)}ms`);
+
+                } catch (err) {
+                    console.error(`[BatchDownload] Error processing file ${name}:`, err);
+                    // Decide whether to abort or continue. Continuing allows partial success.
+                    // But we might want to add an error log file to the zip?
+                    // For now, just log to console.
+                }
+            }
+
+            // 4. Close ZIP
+            console.log(`[BatchDownload] Finalizing ZIP...`);
+            const finalizeStart = performance.now();
+            await zipWriter.close();
+            console.log(`[BatchDownload] Finalized. Duration: ${Math.round(performance.now() - finalizeStart)}ms`);
+
+            const totalDuration = performance.now() - totalStartTime;
+            console.log(`[BatchDownload] Complete. Total files: ${files.length}. Total Duration: ${Math.round(totalDuration)}ms`);
+
+        } catch (e) {
+            console.error(`[BatchDownload] Failed:`, e);
+            throw e;
+        }
     },
 
     /**

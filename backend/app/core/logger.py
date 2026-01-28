@@ -1,12 +1,12 @@
 """
 日志配置模块;
 
-本模块使用 loguru 配置应用日志，提供统一的日志格式和输出;
+本模块使用 loguru 配置应用日志,提供统一的日志格式和输出;
 """
 import sys
 from loguru import logger
 
-# 移除默认处理器，使用自定义格式
+# 移除默认处理器,使用自定义格式
 logger.remove()
 logger.add(
     sys.stderr,

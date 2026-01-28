@@ -13,7 +13,7 @@ SensorHub 是一个用于管理、解析和分析大规模传感器数据的平�
 ### 1.1 核心设计原则
 
 *   **服务层模式 (Service Layer Pattern)**：将业务逻辑(解析、IO、打包)与 API 路由层严格分离;
-*   **混合存储架构**：元数据存入关系型数据库 (SQLite/PostgreSQL);大数据存入文件系统 (Local/S3)，采用 Parquet 列式存储以优化读取性能;
+*   **混合存储架构**：元数据存入关系型数据库 (SQLite/PostgreSQL);大数据存入文件系统 (Local/S3),采用 Parquet 列式存储以优化读取性能;
 *   **基于角色的权限控制 (RBAC)**：通过 JWT 实现 Admin/Researcher/Viewer 分级授权;
 
 ---
@@ -70,7 +70,7 @@ backend/
 
 *   **User**: 存储用户信息及角色;
 *   **SensorFile**: 存储文件元数据、状态及 JSON 结构摘要;
-*   **Relationship**: User (1) -> (N) SensorFile (上传者关联，可选);
+*   **Relationship**: User (1) -> (N) SensorFile (上传者关联,可选);
 
 ### 3.2 核心模型定义
 
@@ -117,16 +117,16 @@ backend/
 
 *   **格式**: `.raw.gz` (Gzip 压缩)
 *   **位置**: `/storage/raw/{file_id}.raw.gz`
-*   **理由**: ASCII 文本压缩率极高，Python gzip 模块可直接流式读取，无需解压到磁盘;
+*   **理由**: ASCII 文本压缩率极高,Python gzip 模块可直接流式读取,无需解压到磁盘;
 
 ### 4.2 解析后数据 (Processed Data)
 
 *   **格式**: `.parquet` (Snappy 或 Zstd 压缩)
 *   **位置**: `/storage/processed/{file_id}/{key}.parquet`
-*   **结构**: 每个 DataFrame 存为一个独立文件，文件夹以 File ID 命名;
+*   **结构**: 每个 DataFrame 存为一个独立文件,文件夹以 File ID 命名;
 *   **理由**:
-    *   **按需读取**: 前端画图时只读取 GPS 数据，无需加载巨大的 IMU 数据;
-    *   **Schema 保留**: 完美保留 float/int/datetime 类型，无需像 CSV 那样重复解析;
+    *   **按需读取**: 前端画图时只读取 GPS 数据,无需加载巨大的 IMU 数据;
+    *   **Schema 保留**: 完美保留 float/int/datetime 类型,无需像 CSV 那样重复解析;
 
 ---
 
@@ -142,9 +142,9 @@ backend/
 
 | 方法 | 路径 | 权限要求 | 描述 |
 | :--- | :--- | :--- | :--- |
-| POST | `/files/upload` | Researcher+ | 上传文件，保存为 gz，写入 DB，(可选) 触发异步解析; |
+| POST | `/files/upload` | Researcher+ | 上传文件,保存为 gz,写入 DB,(可选) 触发异步解析; |
 | GET | `/files` | Viewer+ | 分页获取文件列表;不返回 content_meta 以优化性能; |
-| GET | `/files/{id}/structure` | Viewer+ | 获取单个文件的 content_meta JSON，用于展示文件包含哪些数据表; |
+| GET | `/files/{id}/structure` | Viewer+ | 获取单个文件的 content_meta JSON,用于展示文件包含哪些数据表; |
 | PATCH | `/files/{id}` | Researcher+ | 修改备注、设备类型; |
 | DELETE | `/files/{id}` | Admin | 物理删除文件及数据库记录; |
 
@@ -152,9 +152,9 @@ backend/
 
 | 方法 | 路径 | 权限要求 | 描述 |
 | :--- | :--- | :--- | :--- |
-| GET | `/files/{id}/data/{key}` | Viewer+ | 读取指定 Parquet 文件 (如 'IMU')，返回 JSON/Arrow 流供前端绘图; |
+| GET | `/files/{id}/data/{key}` | Viewer+ | 读取指定 Parquet 文件 (如 'IMU'),返回 JSON/Arrow 流供前端绘图; |
 | GET | `/files/{id}/download` | Researcher+ | 流式下载单个 ZIP (含 raw + csv); |
-| POST | `/files/batch-download` | Researcher+ | 批量下载;接收 ID 列表，流式返回大 ZIP 包; |
+| POST | `/files/batch-download` | Researcher+ | 批量下载;接收 ID 列表,流式返回大 ZIP 包; |
 
 ---
 
@@ -163,17 +163,17 @@ backend/
 ### 6.1 上传与解析流程
 
 1.  **StorageService**: 接收 UploadFile -> 计算 Hash (去重) -> Gzip 压缩 -> 写入 `/raw` -> 返回路径;
-2.  **DB**: 创建 SensorFile 记录，状态设为 `parsing`;
+2.  **DB**: 创建 SensorFile 记录,状态设为 `parsing`;
 3.  **ParserService**:
     *   读取 `.raw.gz`;
-    *   运行 Pandas 解析算法，得到 `Dict[str, DataFrame]`;
-    *   遍历 Dict，将每个 DF 存为 Parquet 至 `/processed/{uuid}/`;
+    *   运行 Pandas 解析算法,得到 `Dict[str, DataFrame]`;
+    *   遍历 Dict,将每个 DF 存为 Parquet 至 `/processed/{uuid}/`;
     *   生成 `content_meta` 统计信息;
-4.  **DB**: 更新 `content_meta`，状态设为 `ready`;
+4.  **DB**: 更新 `content_meta`,状态设为 `ready`;
 
 ### 6.2 批量下载流程 (Batch Download)
 
-为防止内存溢出，必须使用生成器模式：
+为防止内存溢出,必须使用生成器模式：
 
 ```python
 def generate_zip_stream(file_ids):
@@ -201,8 +201,8 @@ def generate_zip_stream(file_ids):
 
 ### 7.1 角色定义
 
-*   **Admin**: 系统维护;可执行 DELETE 操作，管理 User 表;
+*   **Admin**: 系统维护;可执行 DELETE 操作,管理 User 表;
 *   **Researcher**: 核心用户;可上传、编辑、下载数据;
 *   **Viewer**: 访客/只读用户;仅可查看列表和图表;
 
-> **Note**: 先默认所有用户都是Admin，后续再添加权限控制;
+> **Note**: 先默认所有用户都是Admin,后续再添加权限控制;

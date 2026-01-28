@@ -247,7 +247,7 @@ const save = async () => {
   const finalL1 = searchQuery.value.trim() || selectedL1.value || props.initialL1;
   const finalL2 = searchQueryL2.value.trim() || selectedL2.value || '--';
   
-  // 如果用户输入了新的Primary Type，添加到全局列表
+  // 如果用户输入了新的Primary Type,添加到全局列表
   if (finalL1 && !testTypesL1.value.includes(finalL1)) {
     const added = addTestTypeL1(finalL1);
     if (added) {
@@ -261,7 +261,7 @@ const save = async () => {
     }
   }
   
-  // 如果用户输入了新的Sub Type，添加到全局列表
+  // 如果用户输入了新的Sub Type,添加到全局列表
   if (finalL2 && finalL2 !== '--' && !getTestTypesL2(finalL1).includes(finalL2)) {
     const added = addTestTypeL2(finalL1, finalL2);
     if (added) {

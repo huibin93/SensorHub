@@ -47,7 +47,7 @@ def get_files(
         search: 搜索关键词;
         device: 设备类型筛选;
         status: 状态筛选;
-        sort: 排序字段，前缀 "-" 表示降序;
+        sort: 排序字段,前缀 "-" 表示降序;
 
     Returns:
         Tuple[List[SensorFile], int]: 文件列表和总数;
@@ -114,7 +114,7 @@ def get_file(session: Session, file_id: str) -> Optional[SensorFile]:
         file_id: 文件 ID;
 
     Returns:
-        Optional[SensorFile]: 文件对象，不存在时返回 None;
+        Optional[SensorFile]: 文件对象,不存在时返回 None;
     """
     return session.get(SensorFile, file_id)
 
@@ -146,7 +146,7 @@ def update_file(session: Session, file_id: str, updates: dict) -> Optional[Senso
         updates: 要更新的字段字典;
 
     Returns:
-        Optional[SensorFile]: 更新后的文件对象，文件不存在时返回 None;
+        Optional[SensorFile]: 更新后的文件对象,文件不存在时返回 None;
     """
     file = session.get(SensorFile, file_id)
     if not file:
@@ -161,18 +161,58 @@ def update_file(session: Session, file_id: str, updates: dict) -> Optional[Senso
     return file
 
 
-def delete_file(session: Session, file_id: str) -> None:
+def delete_file_safely(session: Session, file_id: str) -> bool:
     """
-    删除文件记录;
-
+    安全删除文件: 只有当物理文件引用计数为 0 时才真正删除物理文件;
+    
     Args:
         session: 数据库会话;
         file_id: 文件 ID;
+        
+    Returns:
+        bool: 是否成功删除;
     """
-    file = session.get(SensorFile, file_id)
-    if file:
-        session.delete(file)
-        session.commit()
+    # 局部导入以避免循环依赖
+    from app.services.storage import StorageService
+    from app.core.logger import logger
+    
+    # 1. 找到要删的文件记录
+    sensor_file = session.get(SensorFile, file_id)
+    if not sensor_file:
+        return False
+        
+    target_hash = sensor_file.file_hash
+    
+    # 2. 删除业务记录
+    session.delete(sensor_file)
+    session.flush() # 提交变更,确保下面的 count 是准的
+    
+    # 3. 检查是否还有其他记录引用此 Hash
+    # (注意：flush 后，当前 sensor_file 已经不在统计范围内了)
+    statement = select(SensorFile).where(SensorFile.file_hash == target_hash)
+    results = session.exec(statement).all()
+    
+    if len(results) == 0:
+        # 4. 没人用了，执行物理清除
+        # a. 删 DB 物理记录
+        physical_file = session.get(PhysicalFile, target_hash)
+        if physical_file:
+            session.delete(physical_file)
+            
+        # b. 删磁盘文件 (调用 Service)
+        StorageService.delete_physical_file(target_hash)
+        logger.info(f"Physical file {target_hash} garbage collected.")
+    else:
+        logger.info(f"Physical file {target_hash} retained. Ref count: {len(results)}")
+        
+    session.commit()
+    return True
+
+def delete_file(session: Session, file_id: str) -> None:
+    """
+    Deprecated: Use delete_file_safely instead.
+    """
+    delete_file_safely(session, file_id)
 
 
 def get_file_by_hash(session: Session, file_hash: str) -> Optional[SensorFile]:
@@ -184,7 +224,7 @@ def get_file_by_hash(session: Session, file_hash: str) -> Optional[SensorFile]:
         file_hash: 文件 Hash;
 
     Returns:
-        Optional[SensorFile]: 文件对象，不存在时返回 None;
+        Optional[SensorFile]: 文件对象,不存在时返回 None;
     """
     return session.exec(select(SensorFile).where(SensorFile.file_hash == file_hash)).first()
 
@@ -211,3 +251,77 @@ def get_file_by_filename(session: Session, filename: str) -> Optional[SensorFile
     根据文件名获取文件;
     """
     return session.exec(select(SensorFile).where(SensorFile.filename == filename)).first()
+
+
+def get_exact_match_file(session: Session, file_hash: str, filename: str) -> Optional[SensorFile]:
+    """
+    根据 Hash 和 文件名 获取文件 (完全匹配);
+    用于检查严苛的去重条件 (同名且同内容).
+    """
+    return session.exec(
+        select(SensorFile)
+        .where(SensorFile.file_hash == file_hash)
+        .where(SensorFile.filename == filename)
+    ).first()
+
+
+def get_file_by_name_and_size(session: Session, filename: str, size: int) -> Optional[SensorFile]:
+    """
+    根据 文件名 和 大小 获取文件 (快速前置检查);
+    用于 Fast Check: 如果库里已有同名且大小一致的文件,视为重复,跳过 MD5 计算.
+    """
+    return session.exec(
+        select(SensorFile)
+        .where(SensorFile.filename == filename)
+        .where(SensorFile.file_size_bytes == size)
+    ).first()
+
+
+def get_next_naming_suffix(session: Session, filename: str) -> str:
+    """
+    计算下一个文件名后缀;
+    例如: filename 已存在 -> 返回 " (1)"
+    filename 和 filename (1) 已存在 -> 返回 " (2)"
+    """
+    # 查找所有同名文件 (不区分后缀, 因为 filename 字段本身是不变的)
+    # 注意: 我们存储的 filename 是原始文件名 (例如 test.rawdata)
+    # 所有的变体也是存储为 filename="test.rawdata", suffix=" (1)" 吗?
+    # 用户说: "SensorFile 再添加一个 数字序号的字符" ... "变成文件名...与这个序号的拼接"
+    # 这意味着所有重名文件的 `filename` 字段都是 IDENTICAL (一样的), 
+    # 区别仅仅在于 `name_suffix` 字段。
+    
+    # 查询所有 filename = target 的记录的 suffix
+    statement = select(SensorFile.name_suffix).where(SensorFile.filename == filename)
+    suffixes = session.exec(statement).all()
+    
+    if not suffixes:
+        return ""
+    
+    # 解析现有的 suffixes
+    # "" -> 0
+    # " (1)" -> 1
+    # " (2)" -> 2
+    max_idx = 0
+    has_empty = False
+    
+    import re
+    pattern = re.compile(r" \((\d+)\)$")
+    
+    for suf in suffixes:
+        if suf == "":
+            has_empty = True
+            continue
+        match = pattern.match(suf)
+        if match:
+            idx = int(match.group(1))
+            if idx > max_idx:
+                max_idx = idx
+                
+    if not has_empty:
+        # 理论上不应该发生 "有 (1) 但没有 空" 的情况 (除非被删了)
+        # 如果没有原始文件，那我们就是原始文件
+        return ""
+        
+    # 下一个序号
+    next_idx = max_idx + 1
+    return f" ({next_idx})"

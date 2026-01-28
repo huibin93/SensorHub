@@ -72,7 +72,8 @@ const triggerParse = (ids: string[]) => {
 
 // ===== BATCH ACTIONS =====
 const handleBatchDownload = () => {
-    console.log('Downloading files:', Array.from(selectedIds.value));
+    if (selectedIds.value.size === 0) return;
+    fileStore.batchDownload(Array.from(selectedIds.value));
     selectedIds.value = new Set();
 };
 
@@ -88,7 +89,18 @@ const deleteRow = (id: string) => {
 };
 
 const downloadRow = (id: string) => {
-    console.log('Downloading file:', id);
+    const file = files.value.find(f => f.id === id);
+    if (file) {
+        let name = file.filename;
+        if (file.nameSuffix) {
+            if (name.toLowerCase().endsWith('.rawdata')) {
+                name = name.slice(0, -8) + file.nameSuffix + '.rawdata';
+            } else {
+                name = name + file.nameSuffix;
+            }
+        }
+        fileStore.downloadFile(id, name);
+    }
     activeRowMenu.value = null;
 };
 
@@ -140,9 +152,9 @@ const handleClickOutside = (event: MouseEvent) => {
                     v-model="filterStatus"
                 >
                 <option value="All">Status: All</option>
-                <option value="Idle">Idle</option>
-                <option value="Processed">Processed</option>
-                <option value="Failed">Failed</option>
+                <option value="unverified">Unverified</option>
+                <option value="verified">Verified</option>
+                <option value="error">Error</option>
                 </select>
                 <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" :size="14" />
             </div>
@@ -220,7 +232,9 @@ const handleClickOutside = (event: MouseEvent) => {
                 <StatusBadge :status="row.status" :error="row.errorMessage" />
             </td>
             <td class="px-4 py-3">
-                <span class="text-sm font-bold text-slate-800">{{ row.filename }}</span>
+                <span class="text-sm font-bold text-slate-800">
+                    {{ row.filename.replace(/\.rawdata$/i, '') }}{{ row.nameSuffix || '' }}
+                </span>
             </td>
             <td class="px-4 py-3 whitespace-nowrap">
                 <div class="flex flex-col">
@@ -263,7 +277,7 @@ const handleClickOutside = (event: MouseEvent) => {
                 </div>
                 <template v-else>
                     <button 
-                        v-if="row.status === FileStatus.Idle"
+                        v-if="row.status === FileStatus.Unverified"
                         @click="triggerParse([row.id])"
                         class="p-1.5 rounded hover:bg-green-50 text-slate-400 hover:text-green-700 transition-colors" 
                         title="Start Parsing"
@@ -271,7 +285,7 @@ const handleClickOutside = (event: MouseEvent) => {
                         <Play :size="18" />
                     </button>
                     <button 
-                        v-if="row.status === FileStatus.Failed || row.status === FileStatus.Processed"
+                        v-if="row.status === FileStatus.Error || row.status === FileStatus.Processed"
                         @click="triggerParse([row.id])"
                         class="p-1.5 rounded transition-colors"
                         :class="row.status === FileStatus.Processed ? 'hover:bg-blue-50 text-blue-400 hover:text-blue-600' : 'hover:bg-orange-50 text-orange-400 hover:text-orange-600'" 

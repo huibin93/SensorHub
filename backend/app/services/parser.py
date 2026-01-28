@@ -1,7 +1,7 @@
 """
 文件解析服务模块;
 
-本模块提供原始传感器文件的解析功能，将其转换为结构化的 Parquet 文件;
+本模块提供原始传感器文件的解析功能,将其转换为结构化的 Parquet 文件;
 """
 from pathlib import Path
 from typing import Dict, Any, Optional

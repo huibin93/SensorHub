@@ -1,7 +1,7 @@
 """
 API 依赖注入模块;
 
-本模块提供 FastAPI 路由中使用的依赖项，如数据库会话;
+本模块提供 FastAPI 路由中使用的依赖项,如数据库会话;
 """
 from typing import Generator
 from sqlmodel import Session

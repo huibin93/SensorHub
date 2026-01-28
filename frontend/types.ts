@@ -4,10 +4,11 @@ export enum DeviceType {
 }
 
 export enum FileStatus {
-  Idle = 'Idle',
-  Processed = 'Processed',   // 后端最终状态: 已处理
-  Processing = 'Processing', // 仅前端本地动画状态
-  Failed = 'Failed',
+  Unverified = 'unverified',
+  Verified = 'verified',
+  Error = 'error',
+  Processing = 'processing',
+  Processed = 'processed',
 }
 
 export interface PacketInfo {
@@ -20,6 +21,7 @@ export interface PacketInfo {
 export interface SensorFile {
   id: string;
   filename: string;
+  nameSuffix?: string; // Phase 5.6: Suffix for duplicate filenames " (1)"
   deviceType: DeviceType;
   status: FileStatus;
   size: string;
