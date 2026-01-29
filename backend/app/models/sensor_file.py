@@ -81,6 +81,11 @@ class SensorFile(SQLModel, table=True):
     upload_time: str = Field(alias="uploadTime")
     packets: str = Field(default="[]")
 
+    # New Fields (Phase 6b)
+    tester: str = Field(default="")
+    mac: str = Field(default="")
+    collection_time: str = Field(default="") # 格式: YYYYMMDD_HHMMSS
+
     # 可选字段
     error_message: Optional[str] = Field(default=None, alias="errorMessage")
     progress: Optional[int] = None

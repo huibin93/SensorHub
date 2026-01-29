@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { LayoutDashboard, Activity, FileText, Settings, Database, ChevronLeft, ChevronRight } from 'lucide-vue-next';
+import { LayoutDashboard, Activity, FileText, Settings, Database, ChevronLeft, ChevronRight, Network } from 'lucide-vue-next';
 
 const isCollapsed = ref(true);
 
@@ -8,11 +8,20 @@ const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value;
 };
 
+const props = defineProps<{
+  activeId: string;
+}>();
+
+const emit = defineEmits<{
+  (e: 'navigate', id: string): void;
+}>();
+
 const menuItems = [
-  { label: 'Data Management', icon: Database, active: true },
-  { label: 'Algorithm Analysis', icon: Activity, active: false },
-  { label: 'Report Center', icon: FileText, active: false },
-  { label: 'Settings', icon: Settings, active: false },
+  { label: 'Data Management', icon: Database, id: 'data' },
+  { label: 'Device Import', icon: Network, id: 'device' },
+  { label: 'Algorithm Analysis', icon: Activity, id: 'algo' },
+  { label: 'Report Center', icon: FileText, id: 'report' },
+  { label: 'Settings', icon: Settings, id: 'settings' },
 ];
 </script>
 
@@ -42,9 +51,10 @@ const menuItems = [
         </div>
         
         <a v-for="item in menuItems" :key="item.label" href="#" 
+           @click.prevent="emit('navigate', item.id)"
            class="flex items-center rounded-xl transition-all duration-300 group relative"
            :class="[
-             item.active 
+             item.id === activeId 
                 ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/50' 
                 : 'hover:bg-white/60 hover:text-slate-700',
              isCollapsed ? 'justify-center px-0 py-3.5' : 'px-3 py-3.5 gap-3'
@@ -52,7 +62,7 @@ const menuItems = [
            :title="isCollapsed ? '' : ''"
         >
             <component :is="item.icon" :size="20" class="shrink-0 transition-colors duration-300" 
-                :class="item.active ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-600'" 
+                :class="item.id === activeId ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-600'" 
             />
             <span class="text-sm font-semibold whitespace-nowrap transition-all duration-300 overflow-hidden" 
                   :class="isCollapsed ? 'w-0 h-0 opacity-0 m-0 p-0' : 'w-auto opacity-100'">

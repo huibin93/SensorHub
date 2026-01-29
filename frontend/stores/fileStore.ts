@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue';
 import { defineStore } from 'pinia';
 import { SensorFile, FileStatus, DeviceType } from '../types';
-import { fileService, StatsResponse } from '../services/fileService';
+import { fileService, StatsResponse, type FilesQueryParams } from '../services/fileService';
 
 export const useFileStore = defineStore('files', () => {
     // ===== STATE =====
@@ -51,11 +51,32 @@ export const useFileStore = defineStore('files', () => {
     /**
      * Fetch files from service with pagination
      */
+    // Last fetch params for polling
+    const lastFetchParams = ref<FilesQueryParams>({});
+
+    /**
+     * Fetch files from service with pagination
+     */
     async function fetchFiles(params: { page?: number; limit?: number; search?: string; device?: string; status?: string } = {}) {
         isLoading.value = true;
         error.value = null;
+
+        // Smart param merging:
+        // 1. If explicit params provided -> use them & update cache
+        // 2. If empty params (polling/refresh) -> use cache
+        // 3. Default limit to 2000 for client-side pagination
+        if (Object.keys(params).length > 0) {
+            lastFetchParams.value = { ...params };
+        }
+
+        const finalParams = {
+            limit: 2000, // Default to high limit for client-side pagination
+            ...lastFetchParams.value,
+            ...params
+        };
+
         try {
-            const response = await fileService.getFiles(params);
+            const response = await fileService.getFiles(finalParams);
             files.value = response.items;
             // Update pagination info in stats
             statsData.value = {

@@ -134,3 +134,24 @@ class AddTestTypeRequest(BaseModel):
 class AddSubTypeRequest(BaseModel):
     """添加测试子类型请求模型;"""
     name: str
+
+
+# --- 设备直接对接相关 ---
+
+class DeviceFile(BaseModel):
+    """设备端文件模型;"""
+    filename: str
+    url: str
+    size: Optional[str] = "Unknown"
+    date: Optional[str] = None
+    is_uploaded: bool = False # 是否已存在于平台数据库
+
+class DeviceFilesResponse(BaseModel):
+    items: List[DeviceFile]
+    total: int
+
+class DeviceDownloadRequest(BaseModel):
+    """设备文件下载请求;"""
+    device_ip: str
+    files: List[DeviceFile] # 包含 url 和 filename
+

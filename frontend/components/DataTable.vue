@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { 
   Search, Filter, ChevronDown, Eye, Download, MoreHorizontal, 
@@ -21,10 +21,69 @@ const selectedIds = ref<Set<string>>(new Set());
 const activeRowMenu = ref<string | null>(null);
 const filterDevice = ref<string>('All');
 const filterStatus = ref<string>('All');
+const searchQuery = ref('');
+
+// ===== PAGINATION STATE =====
+const currentPage = ref(1);
+const pageSize = ref(20);
+
+// ===== COMPUTED: FILTERING & PAGINATION =====
+const filteredFiles = computed(() => {
+    let result = files.value;
+
+    // 1. Search
+    if (searchQuery.value) {
+        const q = searchQuery.value.toLowerCase();
+        result = result.filter(f => 
+            f.filename.toLowerCase().includes(q) || 
+            (f.notes && f.notes.toLowerCase().includes(q)) ||
+            f.id.toLowerCase().includes(q)
+        );
+    }
+
+    // 2. Filter Device
+    if (filterDevice.value !== 'All') {
+        result = result.filter(f => f.deviceType === filterDevice.value);
+    }
+
+    // 3. Filter Status
+    if (filterStatus.value !== 'All') {
+        result = result.filter(f => f.status === filterStatus.value);
+    }
+
+    return result;
+});
+
+const totalPages = computed(() => {
+    if (pageSize.value >= filteredFiles.value.length) return 1;
+    return Math.ceil(filteredFiles.value.length / pageSize.value);
+});
+
+const paginatedFiles = computed(() => {
+    const start = (currentPage.value - 1) * pageSize.value;
+    const end = start + pageSize.value;
+    return filteredFiles.value.slice(start, end);
+});
+
+// ===== WATCHERS =====
+// Reset to page 1 if filters change
+watch([searchQuery, filterDevice, filterStatus, pageSize], () => {
+    currentPage.value = 1;
+});
+
+const handlePageChange = (page: number) => {
+    if (page >= 1 && page <= totalPages.value) {
+        currentPage.value = page;
+    }
+};
 
 // ===== LIFECYCLE =====
 onMounted(() => {
-    fileStore.fetchFiles();
+    // Fetch all files for client-side pagination
+    fileStore.fetchFiles({ limit: 2000 });
+    
+    // Refresh stats
+    fileStore.fetchStats();
     document.addEventListener('click', handleClickOutside);
 });
 
@@ -35,11 +94,16 @@ onUnmounted(() => {
 // ===== SELECTION HANDLERS =====
 const handleSelectAll = (e: Event) => {
   const checked = (e.target as HTMLInputElement).checked;
+  const newSelected = new Set(selectedIds.value);
+  
   if (checked) {
-    selectedIds.value = new Set(files.value.map(f => f.id));
+    // Add all current page items
+    paginatedFiles.value.forEach(f => newSelected.add(f.id));
   } else {
-    selectedIds.value = new Set();
+    // Remove all current page items
+    paginatedFiles.value.forEach(f => newSelected.delete(f.id));
   }
+  selectedIds.value = newSelected;
 };
 
 const handleSelectRow = (id: string) => {
@@ -136,6 +200,7 @@ const handleClickOutside = (event: MouseEvent) => {
             <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" :size="16" />
             <input 
             type="text" 
+            v-model="searchQuery"
             placeholder="Search filename, notes, or ID..." 
             class="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none placeholder-slate-400 bg-white shadow-sm transition-all"
             />
@@ -214,7 +279,7 @@ const handleClickOutside = (event: MouseEvent) => {
                   type="checkbox" 
                   class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   @change="handleSelectAll"
-                  :checked="files.length > 0 && selectedIds.size === files.length"
+                  :checked="paginatedFiles.length > 0 && paginatedFiles.every(f => selectedIds.has(f.id))"
               />
             </th>
             <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50">Status</th>
@@ -228,7 +293,7 @@ const handleClickOutside = (event: MouseEvent) => {
           </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
-          <tr v-for="row in files" :key="row.id" 
+          <tr v-for="row in paginatedFiles" :key="row.id" 
               class="hover:bg-blue-50/30 transition-colors" 
               :class="{ 'bg-blue-50/50': selectedIds.has(row.id) }">
             <td class="px-4 py-3 whitespace-nowrap">
@@ -361,31 +426,70 @@ const handleClickOutside = (event: MouseEvent) => {
             <div class="flex items-center gap-2">
                 <span class="text-gray-600">Show</span>
                 <div class="relative">
-                    <select class="appearance-none bg-white border border-gray-300 text-gray-700 py-1 pl-3 pr-8 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
-                        <option>20 items</option>
-                        <option>50 items</option>
-                        <option>100 items</option>
+                    <select 
+                        v-model.number="pageSize"
+                        class="appearance-none bg-white border border-gray-300 text-gray-700 py-1 pl-3 pr-8 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                    >
+                        <option :value="20">20 items</option>
+                        <option :value="50">50 items</option>
+                        <option :value="100">100 items</option>
                     </select>
                     <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" :size="14" />
                 </div>
             </div>
             
-            <span class="text-gray-500">Total {{ fileStore.stats.totalFiles }} items</span>
+            <span class="text-gray-500">
+                Showing {{ filteredFiles.length > 0 ? (currentPage - 1) * pageSize + 1 : 0 }} - {{ Math.min(currentPage * pageSize, filteredFiles.length) }} of {{ filteredFiles.length }} items
+            </span>
         </div>
 
         <!-- Right: Pagination -->
-        <div class="flex items-center gap-1">
-            <button class="p-1 rounded hover:bg-gray-100 text-gray-400 disabled:opacity-30 transition-colors" disabled>
+        <div class="flex items-center gap-1" v-if="totalPages > 1">
+            <button 
+                @click="handlePageChange(currentPage - 1)"
+                :disabled="currentPage === 1"
+                class="p-1 rounded hover:bg-gray-100 text-gray-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                title="Previous"
+            >
                 <ChevronLeft :size="18" />
             </button>
             
-            <button class="min-w-[32px] h-8 flex items-center justify-center rounded bg-blue-50 text-blue-600 font-medium border border-blue-100">1</button>
-            <button class="min-w-[32px] h-8 flex items-center justify-center rounded hover:bg-gray-50 text-gray-600 transition-colors">2</button>
-            <button class="min-w-[32px] h-8 flex items-center justify-center rounded hover:bg-gray-50 text-gray-600 transition-colors">3</button>
-            <span class="px-2 text-gray-400">...</span>
-            <button class="min-w-[32px] h-8 flex items-center justify-center rounded hover:bg-gray-50 text-gray-600 transition-colors">50</button>
+            <div class="flex items-center gap-1 px-2">
+                 <button 
+                    v-if="currentPage > 2"
+                    @click="handlePageChange(1)"
+                    class="min-w-[32px] h-8 flex items-center justify-center rounded hover:bg-gray-50 text-gray-600 transition-colors"
+                >1</button>
+                <span v-if="currentPage > 3" class="text-gray-400">...</span>
 
-            <button class="p-1 rounded hover:bg-gray-100 text-gray-600 transition-colors">
+                <button 
+                    v-if="currentPage > 1"
+                    @click="handlePageChange(currentPage - 1)"
+                    class="min-w-[32px] h-8 flex items-center justify-center rounded hover:bg-gray-50 text-gray-600 transition-colors"
+                >{{ currentPage - 1 }}</button>
+
+                <button class="min-w-[32px] h-8 flex items-center justify-center rounded bg-blue-50 text-blue-600 font-medium border border-blue-100">{{ currentPage }}</button>
+
+                <button 
+                    v-if="currentPage < totalPages"
+                    @click="handlePageChange(currentPage + 1)"
+                    class="min-w-[32px] h-8 flex items-center justify-center rounded hover:bg-gray-50 text-gray-600 transition-colors"
+                >{{ currentPage + 1 }}</button>
+
+                <span v-if="currentPage < totalPages - 2" class="text-gray-400">...</span>
+                <button 
+                    v-if="currentPage < totalPages - 1"
+                    @click="handlePageChange(totalPages)"
+                    class="min-w-[32px] h-8 flex items-center justify-center rounded hover:bg-gray-50 text-gray-600 transition-colors"
+                >{{ totalPages }}</button>
+            </div>
+
+            <button 
+                @click="handlePageChange(currentPage + 1)"
+                :disabled="currentPage === totalPages"
+                class="p-1 rounded hover:bg-gray-100 text-gray-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                title="Next"
+            >
                 <ChevronRight :size="18" />
             </button>
         </div>

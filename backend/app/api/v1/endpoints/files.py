@@ -17,6 +17,7 @@ from app.schemas import api_models
 from app.crud import file as crud
 from app.services.storage import StorageService
 from app.services.parser import ParserService
+from app.services.metadata import parse_filename, ensure_test_types_exist
 from app.models.sensor_file import SensorFile, PhysicalFile
 from app.core.logger import logger
 from app.core.database import engine
@@ -228,6 +229,25 @@ async def upload_file(
              status=initial_status,
              processedDir=str(processed_dir)
          )
+         
+         # Parse Metadata (Optional override for deduplication case? 
+         # Requirement says "Frontend file entry also needs parsing". 
+         # If strict exact match found, we skip return.
+         # But here we are creating a NEW SensorFile pointing to OLD physical file.
+         # So we SHOULD parse the NEW filename metadata.
+         meta = parse_filename(filename)
+         new_sf.test_type_l1 = meta.get("test_type_l1", "Unknown")
+         new_sf.test_type_l2 = meta.get("test_type_l2", "--")
+         new_sf.tester = meta.get("tester", "")
+         new_sf.mac = meta.get("mac", "")
+         new_sf.collection_time = meta.get("collection_time", "")
+         if meta.get("deviceType"):
+             new_sf.device_type = meta.get("deviceType")
+         
+         # Auto-Insert Dictionary
+         if meta.get("test_type_l1"):
+             ensure_test_types_exist(session, meta.get("test_type_l1"), meta.get("test_type_l2"))
+
          crud.create_file(session, new_sf)
          
          return {
@@ -283,6 +303,21 @@ async def upload_file(
             status="unverified",
             processedDir=str(StorageService.get_processed_dir(md5)) # 使用 Hash
         )
+        
+        # Parse Metadata
+        meta = parse_filename(filename)
+        new_sf.test_type_l1 = meta.get("test_type_l1", "Unknown")
+        new_sf.test_type_l2 = meta.get("test_type_l2", "--")
+        new_sf.tester = meta.get("tester", "")
+        new_sf.mac = meta.get("mac", "")
+        new_sf.collection_time = meta.get("collection_time", "")
+        if meta.get("deviceType"):
+             new_sf.device_type = meta.get("deviceType")
+
+        # Auto-Insert Dictionary
+        if meta.get("test_type_l1"):
+             ensure_test_types_exist(session, meta.get("test_type_l1"), meta.get("test_type_l2"))
+
         crud.create_file(session, new_sf)
         
         # 5. 触发后台校验
