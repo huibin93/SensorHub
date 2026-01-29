@@ -162,7 +162,9 @@ const handleClickOutside = (event: MouseEvent) => {
                 >
                 <option value="All">Status: All</option>
                 <option value="unverified">Unverified</option>
-                <option value="verified">Verified</option>
+                <option value="idle">Ready (Idle)</option>
+                <option value="processed">Processed</option>
+                <option value="failing">Failing</option>
                 <option value="error">Error</option>
                 </select>
                 <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" :size="14" />
@@ -286,7 +288,7 @@ const handleClickOutside = (event: MouseEvent) => {
                 </div>
                 <template v-else>
                     <button 
-                        v-if="row.status === FileStatus.Unverified"
+                        v-if="row.status === FileStatus.Idle"
                         @click="triggerParse([row.id])"
                         class="p-1.5 rounded hover:bg-green-50 text-slate-400 hover:text-green-700 transition-colors" 
                         title="Start Parsing"
@@ -294,7 +296,7 @@ const handleClickOutside = (event: MouseEvent) => {
                         <Play :size="18" />
                     </button>
                     <button 
-                        v-if="row.status === FileStatus.Error || row.status === FileStatus.Processed"
+                        v-if="row.status === FileStatus.Error || row.status === FileStatus.Processed || row.status === FileStatus.Failing"
                         @click="triggerParse([row.id])"
                         class="p-1.5 rounded transition-colors"
                         :class="row.status === FileStatus.Processed ? 'hover:bg-blue-50 text-blue-400 hover:text-blue-600' : 'hover:bg-orange-50 text-orange-400 hover:text-orange-600'" 
@@ -302,6 +304,8 @@ const handleClickOutside = (event: MouseEvent) => {
                     >
                             <RotateCw :size="18" />
                     </button>
+                    <!-- Unverified: Show nothing or spinner? -->
+                    <span v-if="row.status === FileStatus.Unverified" class="text-xs text-slate-400 italic">Verifying...</span>
                 </template>
 
                 <!-- 2. Analyze Button -->

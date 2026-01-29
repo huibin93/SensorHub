@@ -16,7 +16,7 @@ class StatsResponse(BaseModel):
     todayUploads: int
     pendingTasks: int
     storageUsed: str
-    lastUpdated: str
+
 
 
 # --- 文件相关 ---

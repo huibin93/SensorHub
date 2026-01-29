@@ -12,16 +12,25 @@ export const useFileStore = defineStore('files', () => {
         totalFiles: 0,
         todayUploads: 0,
         pendingTasks: 0,
-        storageUsed: '--',
-        lastUpdated: ''
+        storageUsed: '--'
     });
 
     // ===== GETTERS =====
     // Stats is now from API, but we also compute pending from local files for real-time update
     const stats = computed(() => ({
         ...statsData.value,
-        totalFiles: files.value.length > 0 ? files.value.length : statsData.value.totalFiles,
-        pendingTasks: files.value.filter(f => f.status === FileStatus.Processing || f.status === FileStatus.Unverified).length,
+        totalFiles: files.value.length > 0 ? statsData.value.totalFiles : statsData.value.totalFiles, // Trust backend for total count unless searching? actually existing logic seemed weird. Let's rely on statsData mainly. But current file list might be filtered. Stick to statsData for global stats.
+        // Actually, let's keep it simple: prefer statsData for everything global.
+        // But for pendingTasks, we might want real-time feedback from local state?
+        // "today's pending" is strict. Local files might not be from today.
+        // So relying on backend statsData is safer.
+        pendingTasks: files.value.some(f =>
+            f.status === FileStatus.Processing ||
+            f.status === FileStatus.Unverified ||
+            f.status === FileStatus.Idle
+        )
+            ? statsData.value.pendingTasks // Backend handles the "today" scoping logic
+            : statsData.value.pendingTasks
     }));
 
     // ===== ACTIONS =====
@@ -31,14 +40,11 @@ export const useFileStore = defineStore('files', () => {
      */
     async function fetchStats() {
         try {
-            statsData.value = {
-                ...await fileService.getStats(),
-                lastUpdated: new Date().toLocaleTimeString()
-            };
+            statsData.value = await fileService.getStats();
             console.log('[FileStore] Fetched stats:', statsData.value);
         } catch (e) {
             console.error('[FileStore] Failed to fetch stats:', e);
-            statsData.value.lastUpdated = '--';
+            // statsData.value.lastUpdated = '--'; // Removed
         }
     }
 
@@ -166,12 +172,13 @@ export const useFileStore = defineStore('files', () => {
 
             // 估算进度动画时长 (10MB/s)
             // 从 file.size 解析数字 (支持 "1.5 KB" 或 "10.2 MB")
-            const sizeMatch = file.size.match(/(\d+\.?\d*)\s*(KB|MB|GB)/i);
+            const sizeMatch = file.size.match(/(\d+\.?\d*)\s*(KB|MB|GB|B)/i);
             let sizeInMB = 1; // 默认 1MB
             if (sizeMatch) {
                 const value = parseFloat(sizeMatch[1]);
                 const unit = sizeMatch[2].toUpperCase();
-                if (unit === 'KB') sizeInMB = value / 1024;
+                if (unit === 'B') sizeInMB = value / (1024 * 1024);
+                else if (unit === 'KB') sizeInMB = value / 1024;
                 else if (unit === 'MB') sizeInMB = value;
                 else if (unit === 'GB') sizeInMB = value * 1024;
             }

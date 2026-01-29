@@ -143,15 +143,17 @@ def verify_upload_task(file_id: str, md5: str, path: str):
         
         with Session(engine) as session:
             if is_valid:
-                crud.update_file(session, file_id, {"status": "verified"})
+                crud.update_file(session, file_id, {"status": "idle"})
                 logger.info(f"File {file_id} verified successfully.")
             else:
-                crud.update_file(session, file_id, {"status": "error", "error_message": "Integrity Check Failed"})
+                msg = "Integrity Check Failed"
+                crud.update_file(session, file_id, {"status": "error", "notes": msg, "error_message": msg})
                 logger.error(f"File {file_id} validation failed.")
     except Exception as e:
         logger.error(f"Error in verify_upload_task: {e}")
         with Session(engine) as session:
-            crud.update_file(session, file_id, {"status": "error", "error_message": f"Verification Error: {str(e)}"})
+            msg = f"Verification Error: {str(e)}"
+            crud.update_file(session, file_id, {"status": "error", "notes": msg, "error_message": msg})
 
 
 @router.post("/files/upload", response_model=Any) # Return Any to support flexible JSON
@@ -168,79 +170,75 @@ async def upload_file(
     流式上传 Zstd 压缩文件 (接口 v2);
     前端已完成压缩和 MD5 计算。后端直接落盘并异步校验。
     """
-    # 1. 幂等性/秒传检查
-    existing_file = crud.get_file_by_hash(session, md5)
+    # 1. 检查物理文件是否存在 (秒传核心逻辑)
+    existing_phy = crud.get_physical_file(session, md5)
+    expected_raw_path = StorageService.get_raw_path(md5)
     
-    # 检查 PhysicalFile 是否真的在磁盘上
-    raw_dir = StorageService.get_raw_dir()
-    expected_path = raw_dir / f"{md5}.raw.zst"
-    
-    if existing_file:
-        existing_phy = crud.get_physical_file(session, md5)
-        expected_raw_path = StorageService.get_raw_path(md5)
-        
-        if existing_phy and expected_raw_path.exists():
-             # --- 命中秒传 (Physical Deduplication) ---
-             logger.info(f"Instant upload (deduplication) for {filename} ({md5})")
-             
-             # 严苛去重检查: 如果同名且同 Hash, 直接复用已有 SensorFile
-             exact_match = crud.get_exact_match_file(session, md5, filename)
-             if exact_match:
-                 logger.info(f"Exact match found for {filename} ({md5}). Skipping creation.")
-                 return {
-                     "code": 200,
-                     "data": {
-                         "file_id": exact_match.id,
-                         "status": exact_match.status,
-                         "saved_path": str(expected_raw_path),
-                         "is_duplicate": True
-                     },
-                     "message": "文件已存在 (无需重复上传)"
-                 }
-
-             # 检查解析状态 (Smart Status)
-             processed_dir = StorageService.get_processed_dir(md5)
-             initial_status = "verified"
-             if processed_dir.exists() and any(processed_dir.iterdir()):
-                 initial_status = "processed"
-             
-             # 创建新的 SensorFile (指向同一个 Hash, 但文件名不同)
-             file_id = str(uuid.uuid4())
-             
-             # 计算文件名后缀
-             name_suffix = crud.get_next_naming_suffix(session, filename)
-             
-             # 显示大小
-             if original_size < 1024 * 1024:
-                 size_str = f"{original_size / 1024:.1f} KB"
-             else:
-                 size_str = f"{original_size / (1024 * 1024):.1f} MB"
-             
-             new_sf = SensorFile(
-                 id=file_id,
-                 file_hash=md5,
-                 filename=filename, # 使用新上传的文件名
-                 deviceType=deviceType,
-                 deviceModel="Unknown",
-                 size=size_str,
-                 file_size_bytes=original_size, # 保存 Int 大小
-                 name_suffix=name_suffix, # 无需重名冲突
-                 uploadTime=datetime.utcnow().isoformat(),
-                 status=initial_status,
-                 processedDir=str(processed_dir)
-             )
-             crud.create_file(session, new_sf)
-             
+    if existing_phy and expected_raw_path.exists():
+         # --- 命中秒传 (Physical Deduplication) ---
+         logger.info(f"Instant upload (deduplication) for {filename} ({md5})")
+         
+         # 严苛去重检查: 如果已存在 同名且同Hash 的 SensorFile, 直接返回该记录
+         exact_match = crud.get_exact_match_file(session, md5, filename)
+         if exact_match:
+             logger.info(f"Exact match found for {filename} ({md5}). Skipping creation.")
              return {
                  "code": 200,
                  "data": {
-                     "file_id": file_id,
-                     "status": initial_status,
-                     "saved_path": str(expected_raw_path)
+                     "file_id": exact_match.id,
+                     "status": exact_match.status,
+                     "saved_path": str(expected_raw_path),
+                     "is_duplicate": True
                  },
-                 "message": "🎉 秒传成功！(File exists)"
+                 "message": "文件已存在 (无需重复上传)"
              }
-        
+
+         # 检查解析状态 (Smart Status)
+         processed_dir = StorageService.get_processed_dir(md5)
+         initial_status = "idle"
+         if processed_dir.exists() and any(processed_dir.iterdir()):
+             initial_status = "processed"
+         
+         # 创建新的 SensorFile (指向同一个 Hash, 但文件名不同)
+         file_id = str(uuid.uuid4())
+         
+         # 计算文件名后缀
+         name_suffix = crud.get_next_naming_suffix(session, filename)
+         
+         # 显示大小
+         if original_size < 1024:
+             size_str = f"{original_size} B"
+         elif original_size < 1024 * 1024:
+             size_str = f"{original_size / 1024:.1f} KB"
+         elif original_size < 1024 * 1024 * 1024:
+             size_str = f"{original_size / (1024 * 1024):.1f} MB"
+         else:
+             size_str = f"{original_size / (1024 * 1024 * 1024):.1f} GB"
+         
+         new_sf = SensorFile(
+             id=file_id,
+             file_hash=md5,
+             filename=filename, # 使用新上传的文件名
+             deviceType=deviceType,
+             deviceModel="Unknown",
+             size=size_str,
+             file_size_bytes=original_size, # 保存 Int 大小
+             name_suffix=name_suffix,
+             uploadTime=datetime.utcnow().isoformat(),
+             status=initial_status,
+             processedDir=str(processed_dir)
+         )
+         crud.create_file(session, new_sf)
+         
+         return {
+             "code": 200,
+             "data": {
+                 "file_id": file_id,
+                 "status": initial_status,
+                 "saved_path": str(expected_raw_path)
+             },
+             "message": "🎉 秒传成功！(File exists)"
+         }
     
     # 2. 物理文件不存在，执行常规上传
     file_id = str(uuid.uuid4())
@@ -263,10 +261,14 @@ async def upload_file(
         name_suffix = crud.get_next_naming_suffix(session, filename)
         
         # 显示大小
-        if original_size < 1024 * 1024:
+        if original_size < 1024:
+            size_str = f"{original_size} B"
+        elif original_size < 1024 * 1024:
             size_str = f"{original_size / 1024:.1f} KB"
-        else:
+        elif original_size < 1024 * 1024 * 1024:
             size_str = f"{original_size / (1024 * 1024):.1f} MB"
+        else:
+            size_str = f"{original_size / (1024 * 1024 * 1024):.1f} GB"
             
         new_sf = SensorFile(
             id=file_id,
@@ -299,181 +301,7 @@ async def upload_file(
         logger.error(f"Upload processing failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- Background Tasks ---
-def verify_upload_task(file_id: str, md5: str, path: str):
-    """
-    后台校验任务: 检查文件完整性并更新 DB Status
-    """
-    logger.info(f"Starting background verification for file {file_id}")
-    try:
-        is_valid = StorageService.verify_integrity(Path(path), md5)
-        
-        with Session(engine) as session:
-            if is_valid:
-                crud.update_file(session, file_id, {"status": "verified"})
-                logger.info(f"File {file_id} verified successfully.")
-            else:
-                crud.update_file(session, file_id, {"status": "error", "error_message": "Integrity Check Failed"})
-                logger.error(f"File {file_id} validation failed.")
-                # Optional: Delete bad file?
-                # StorageService.delete_file(md5) 
-    except Exception as e:
-        logger.error(f"Error in verify_upload_task: {e}")
-        with Session(engine) as session:
-            crud.update_file(session, file_id, {"status": "error", "error_message": f"Verification Error: {str(e)}"})
 
-
-@router.post("/files/upload", response_model=Any) # Return Any to support flexible JSON
-async def upload_file(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    md5: str = Form(...),
-    filename: str = Form(..., description="Original filename"),
-    original_size: int = Form(...),
-    deviceType: Optional[str] = Form("Unknown"),
-    session: Session = Depends(deps.get_db)
-) -> Any:
-    """
-    流式上传 Zstd 压缩文件 (接口 v2);
-    前端已完成压缩和 MD5 计算。后端直接落盘并异步校验。
-    """
-    # 1. 幂等性/秒传检查
-    existing_file = crud.get_file_by_hash(session, md5)
-    
-    # 获取 SensorFile (通过 filename 或 md5?)
-    # 逻辑: 
-    # 如果 PhysicalFile 存在 (storage check) 且 SensorFile 状态OK -> 秒传
-    # 如果 SensorFile 存在但状态是 Error -> 允许重传
-    
-    # 检查 PhysicalFile 是否真的在磁盘上
-    raw_dir = StorageService.get_raw_dir()
-    expected_path = raw_dir / f"{md5}.raw.zst"
-    
-    if existing_file:
-        # 如果数据库说已存在 (Metadata Deduplication Check)
-        # 但我们现在做的是 物理文件层去重。
-        # 即使 existing_file 存在，用户能再次上传？
-        # 现有逻辑：
-        # 如果 Status OK 且 Physical 存在 -> 秒传
-        # 如果 Status Error -> 允许重传
-        
-        # 检查 PhysicalFile 是否在 DB 中存在
-        existing_phy = crud.get_physical_file(session, md5)
-        
-        # 检查物理文件是否真的在磁盘上
-        expected_raw_path = StorageService.get_raw_path(md5)
-        
-        if existing_phy and expected_raw_path.exists():
-             # --- 命中秒传 (Physical Deduplication) ---
-             logger.info(f"Instant upload (deduplication) for {filename} ({md5})")
-             
-             # 严苛去重检查: 如果同名且同 Hash, 直接复用已有 SensorFile
-             exact_match = crud.get_exact_match_file(session, md5, filename)
-             if exact_match:
-                 logger.info(f"Exact match found for {filename} ({md5}). Skipping creation.")
-                 return {
-                     "code": 200,
-                     "data": {
-                         "file_id": exact_match.id,
-                         "status": exact_match.status,
-                         "saved_path": str(expected_raw_path),
-                         "is_duplicate": True
-                     },
-                     "message": "文件已存在 (无需重复上传)"
-                 }
-
-             # 检查解析状态 (Smart Status)
-             processed_dir = StorageService.get_processed_dir(md5)
-             initial_status = "verified"
-             # 简单的检查：如果目录存在且非空，视为 Processed
-             if processed_dir.exists() and any(processed_dir.iterdir()):
-                 initial_status = "processed"
-             
-             # 创建新的 SensorFile (指向同一个 Hash, 但文件名不同)
-             file_id = str(uuid.uuid4())
-             
-             # 显示大小
-             if original_size < 1024 * 1024:
-                 size_str = f"{original_size / 1024:.1f} KB"
-             else:
-                 size_str = f"{original_size / (1024 * 1024):.1f} MB"
-             
-             new_sf = SensorFile(
-                 id=file_id,
-                 file_hash=md5,
-                 filename=filename, # 使用新上传的文件名
-                 deviceType=deviceType,
-                 deviceModel="Unknown",
-                 size=size_str,
-                 uploadTime=datetime.utcnow().isoformat(),
-                 status=initial_status,
-                 processedDir=str(processed_dir)
-             )
-             crud.create_file(session, new_sf)
-             
-             return {
-                 "code": 200,
-                 "data": {
-                     "file_id": file_id,
-                     "status": initial_status,
-                     "saved_path": str(expected_raw_path)
-                 },
-                 "message": "🎉 秒传成功！(File exists)"
-             }
-        
-    
-    # 2. 物理文件不存在，执行常规上传
-    file_id = str(uuid.uuid4())
-    
-    # 3. 流式落盘 (不论是否首次,都覆盖写入以确保文件正确)
-    try:
-        save_res = await StorageService.save_zstd_stream(file, md5)
-        saved_path = save_res["raw_path"]
-        
-        # 4. 更新/创建 DB 记录
-        
-        # 4.1 PhysicalFile
-        phy_file = crud.get_physical_file(session, md5)
-        if not phy_file:
-            phy_file = PhysicalFile(hash=md5, size=save_res["file_size"], path=saved_path)
-            crud.create_physical_file(session, phy_file)
-            
-        # 4.2 SensorFile
-        # 显示大小
-        if original_size < 1024 * 1024:
-            size_str = f"{original_size / 1024:.1f} KB"
-        else:
-            size_str = f"{original_size / (1024 * 1024):.1f} MB"
-            
-        new_sf = SensorFile(
-            id=file_id,
-            file_hash=md5,
-            filename=filename,
-            deviceType=deviceType,
-            deviceModel="Unknown",
-            size=size_str,
-            uploadTime=datetime.utcnow().isoformat(),
-            status="unverified",
-            processedDir=str(StorageService.get_processed_dir(md5)) # 使用 Hash
-        )
-        crud.create_file(session, new_sf)
-        
-        # 5. 触发后台校验
-        background_tasks.add_task(verify_upload_task, file_id, md5, saved_path)
-        
-        return {
-            "code": 200,
-            "data": {
-                "file_id": file_id,
-                "status": "unverified",
-                "saved_path": saved_path
-            },
-            "message": "文件上传成功,正在校验..."
-        }
-        
-    except Exception as e:
-        logger.error(f"Upload processing failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.patch("/files/{file_id}")

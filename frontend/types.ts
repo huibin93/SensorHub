@@ -5,10 +5,11 @@ export enum DeviceType {
 
 export enum FileStatus {
   Unverified = 'unverified',
-  Verified = 'verified',
+  Idle = 'idle',
   Error = 'error',
   Processing = 'processing',
   Processed = 'processed',
+  Failing = 'failing',
 }
 
 export interface PacketInfo {

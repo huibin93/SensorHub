@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Clock, CheckCircle2, Loader2, AlertCircle } from 'lucide-vue-next';
+import { Clock, CheckCircle2, Loader2, AlertCircle, PlayCircle, XCircle } from 'lucide-vue-next';
 import { FileStatus } from '../types';
 
 defineProps<{
@@ -25,5 +25,15 @@ defineProps<{
       class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800" 
       :title="error">
     <AlertCircle :size="12" /> Error
+  </span>
+
+  <span v-else-if="status === FileStatus.Failing" 
+      class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-800" 
+      :title="error">
+    <XCircle :size="12" /> Parsing Failed
+  </span>
+
+  <span v-else-if="status === FileStatus.Idle" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-600">
+    <PlayCircle :size="12" /> Ready
   </span>
 </template>

@@ -4,7 +4,8 @@
 本模块提供传感器文件的数据库增删改查操作;
 """
 from typing import List, Optional, Tuple
-from sqlmodel import Session, select, func, desc, or_
+from datetime import date
+from sqlmodel import Session, select, func, desc, or_, cast, Date
 from app.models.sensor_file import SensorFile, PhysicalFile
 
 
@@ -18,13 +19,40 @@ def get_stats(session: Session) -> dict:
     Returns:
         dict: 包含文件总数等统计信息;
     """
+    # 计算总文件数
     total_files = session.exec(select(func.count(SensorFile.id))).one()
+
+    # 计算今日上传
+    today_count = session.exec(
+        select(func.count(SensorFile.id))
+        .where(func.date(SensorFile.upload_time) == date.today())
+    ).one()
+
+    # 计算今日待处理 (pendingTasks)
+    # 定义: 今日上传且状态为 'idle' 或 'unverified'
+    pending_count = session.exec(
+        select(func.count(SensorFile.id))
+        .where(func.date(SensorFile.upload_time) == date.today())
+        .where(or_(SensorFile.status == 'idle', SensorFile.status == 'unverified'))
+    ).one()
+
+    # 计算总存储空间 (基于 PhysicalFile)
+    total_bytes = session.exec(select(func.sum(PhysicalFile.size))).one() or 0
+    
+    if total_bytes < 1024:
+        storage_str = f"{total_bytes} B"
+    elif total_bytes < 1024 * 1024:
+        storage_str = f"{total_bytes / 1024:.2f} KB"
+    elif total_bytes < 1024 * 1024 * 1024:
+        storage_str = f"{total_bytes / (1024 * 1024):.2f} MB"
+    else:
+        storage_str = f"{total_bytes / (1024 * 1024 * 1024):.2f} GB"
+
     return {
         "totalFiles": total_files,
-        "todayUploads": 0,  # 占位符
-        "pendingTasks": 0,  # 占位符
-        "storageUsed": "0 GB",  # 占位符
-        "lastUpdated": ""
+        "todayUploads": today_count,
+        "pendingTasks": pending_count, 
+        "storageUsed": storage_str
     }
 
 
