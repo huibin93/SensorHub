@@ -10,6 +10,7 @@ import StatusBadge from './StatusBadge.vue';
 import EditableTestTypeCell from './EditableTestTypeCell.vue';
 import EditableNoteCell from './EditableNoteCell.vue';
 import EditableDeviceCell from './EditableDeviceCell.vue';
+import BatchEditModal from './BatchEditModal.vue';
 import { useFileStore } from '../stores/fileStore';
 
 // ===== STORE =====
@@ -19,6 +20,7 @@ const { files, isLoading } = storeToRefs(fileStore);
 // ===== LOCAL UI STATE =====
 const selectedIds = ref<Set<string>>(new Set());
 const activeRowMenu = ref<string | null>(null);
+const showBatchEditModal = ref(false);
 const filterDevice = ref<string>('All');
 const filterStatus = ref<string>('All');
 const searchQuery = ref('');
@@ -141,6 +143,18 @@ const handleBatchDownload = () => {
     selectedIds.value = new Set();
 };
 
+const handleBatchEdit = () => {
+    if (selectedIds.value.size === 0) return;
+    showBatchEditModal.value = true;
+};
+
+const onBatchEditConfirm = async (updates: any) => {
+    showBatchEditModal.value = false;
+    // Call store action
+    await fileStore.batchUpdate(Array.from(selectedIds.value), updates);
+    selectedIds.value = new Set(); // Clear selection after update
+};
+
 const handleBatchDelete = () => {
     const count = selectedIds.value.size;
     if (count === 0) return;
@@ -247,6 +261,12 @@ const handleClickOutside = (event: MouseEvent) => {
             <span class="text-sm font-medium text-gray-600 bg-gray-100 px-3 py-2 rounded-lg whitespace-nowrap">
                 {{ selectedIds.size }} Selected
             </span>
+             <button 
+                @click="handleBatchEdit"
+                class="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm whitespace-nowrap"
+            >
+                <Edit2 :size="16" /> Edit
+            </button>
             <button 
                 @click="triggerParse(Array.from(selectedIds))"
                 class="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm whitespace-nowrap"
@@ -494,5 +514,13 @@ const handleClickOutside = (event: MouseEvent) => {
             </button>
         </div>
     </div>
+
+    <!-- Batch Edit Modal -->
+    <BatchEditModal 
+        :is-open="showBatchEditModal"
+        :selected-count="selectedIds.size"
+        @close="showBatchEditModal = false"
+        @confirm="onBatchEditConfirm"
+    />
   </div>
 </template>

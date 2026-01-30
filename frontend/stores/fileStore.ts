@@ -12,7 +12,7 @@ export const useFileStore = defineStore('files', () => {
         totalFiles: 0,
         todayUploads: 0,
         pendingTasks: 0,
-        storageUsed: '--'
+        storageUsed: 0
     });
 
     // ===== GETTERS =====
@@ -322,6 +322,59 @@ export const useFileStore = defineStore('files', () => {
         }
     }
 
+    /**
+     * Batch update files
+     * Iterates through IDs and calls updateFile for each.
+     */
+    async function batchUpdate(ids: string[], updates: {
+        deviceType?: string;
+        deviceModel?: string;
+        testTypeL1?: string;
+        testTypeL2?: string;
+        notes?: string;
+    }) {
+        console.log('[FileStore] Batch updating files:', ids.length, updates);
+
+        let successCount = 0;
+        let failCount = 0;
+
+        // Create a copy of updates to avoid reference issues
+        const payload: any = { ...updates };
+
+        for (const id of ids) {
+            const file = files.value.find(f => f.id === id);
+            if (!file) continue;
+
+            // Optimistic update
+            const backup = { ...file };
+
+            if (payload.deviceType) file.deviceType = payload.deviceType;
+            if (payload.deviceModel) file.deviceModel = payload.deviceModel;
+            if (payload.testTypeL1) file.testTypeL1 = payload.testTypeL1;
+            if (payload.testTypeL2) file.testTypeL2 = payload.testTypeL2;
+            if (payload.notes !== undefined) file.notes = payload.notes;
+
+            try {
+                await fileService.updateFile(id, payload);
+                successCount++;
+            } catch (e) {
+                console.error(`[FileStore] Failed to update file ${id}:`, e);
+                // Rollback
+                Object.assign(file, backup);
+                failCount++;
+            }
+        }
+
+        console.log(`[FileStore] Batch update complete. Success: ${successCount}, Failed: ${failCount}`);
+
+        // Refresh to ensure consistency if any failures
+        if (failCount > 0) {
+            fetchFiles();
+        }
+
+        return { success: successCount, failed: failCount };
+    }
+
     return {
         // State
         files,
@@ -340,5 +393,6 @@ export const useFileStore = defineStore('files', () => {
         deleteFile,
         downloadFile,
         batchDownload,
+        batchUpdate,
     };
 });

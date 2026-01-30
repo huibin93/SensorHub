@@ -15,7 +15,7 @@ class StatsResponse(BaseModel):
     totalFiles: int
     todayUploads: int
     pendingTasks: int
-    storageUsed: str
+    storageUsed: int
 
 
 

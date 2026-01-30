@@ -8,6 +8,7 @@ import ZstdWorker from '../workers/zstd.worker.js?worker';
 import { v4 as uuidv4 } from 'uuid';
 
 import { workerService } from '../services/workerService';
+import { formatBytes, formatBytesSplit } from '../utils/format';
 
 const fileStore = useFileStore();
 
@@ -510,7 +511,7 @@ defineExpose({ handleFileSelect });
             <div class="p-5 flex flex-col justify-center items-center h-full hover:bg-slate-50 transition-all duration-300 first:rounded-l-2xl group cursor-default">
                 <div class="flex flex-col items-center gap-2 mb-1">
                     <FileText :size="18" class="text-slate-400 group-hover:text-blue-500 transition-colors" />
-                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">Total Files</span>
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Total Files</span>
                 </div>
                 <div class="text-2xl font-bold text-slate-800 group-hover:scale-105 transition-transform">{{ fileStore.stats.totalFiles.toLocaleString() }}</div>
             </div>
@@ -518,7 +519,7 @@ defineExpose({ handleFileSelect });
             <div class="p-5 flex flex-col justify-center items-center h-full hover:bg-slate-50 transition-all duration-300 group cursor-default">
                 <div class="flex flex-col items-center gap-2 mb-1">
                     <CheckCircle :size="18" class="text-slate-400 group-hover:text-green-500 transition-colors" />
-                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">Today</span>
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Today</span>
                 </div>
                 <div class="text-2xl font-bold text-slate-800 group-hover:scale-105 transition-transform">{{ fileStore.stats.todayUploads }}</div>
             </div>
@@ -526,7 +527,7 @@ defineExpose({ handleFileSelect });
             <div class="p-5 flex flex-col justify-center items-center h-full hover:bg-slate-50 transition-all duration-300 group cursor-default">
                 <div class="flex flex-col items-center gap-2 mb-1">
                     <Clock :size="18" class="text-slate-400 group-hover:text-amber-500 transition-colors" />
-                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">Pending</span>
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Pending</span>
                 </div>
                 <div class="text-2xl font-bold text-slate-800 group-hover:scale-105 transition-transform">{{ fileStore.stats.pendingTasks }}</div>
             </div>
@@ -534,9 +535,12 @@ defineExpose({ handleFileSelect });
             <div class="p-5 flex flex-col justify-center items-center h-full hover:bg-slate-50 transition-all duration-300 last:rounded-r-2xl group cursor-default">
                 <div class="flex flex-col items-center gap-2 mb-1">
                     <Database :size="18" class="text-slate-400 group-hover:text-purple-500 transition-colors" />
-                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">Storage</span>
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Storage</span>
                 </div>
-                <div class="text-2xl font-bold text-slate-800 group-hover:scale-105 transition-transform">{{ fileStore.stats.storageUsed }}</div>
+                <div class="flex items-baseline gap-1 group-hover:scale-105 transition-transform">
+                     <span class="text-2xl font-bold text-slate-800">{{ formatBytesSplit(fileStore.stats.storageUsed).value }}</span>
+                     <span class="text-sm font-semibold text-slate-500">{{ formatBytesSplit(fileStore.stats.storageUsed).unit }}</span>
+                </div>
             </div>
         </div>
     </div>

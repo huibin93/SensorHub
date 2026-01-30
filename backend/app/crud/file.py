@@ -39,20 +39,11 @@ def get_stats(session: Session) -> dict:
     # 计算总存储空间 (基于 PhysicalFile)
     total_bytes = session.exec(select(func.sum(PhysicalFile.size))).one() or 0
     
-    if total_bytes < 1024:
-        storage_str = f"{total_bytes} B"
-    elif total_bytes < 1024 * 1024:
-        storage_str = f"{total_bytes / 1024:.2f} KB"
-    elif total_bytes < 1024 * 1024 * 1024:
-        storage_str = f"{total_bytes / (1024 * 1024):.2f} MB"
-    else:
-        storage_str = f"{total_bytes / (1024 * 1024 * 1024):.2f} GB"
-
     return {
         "totalFiles": total_files,
         "todayUploads": today_count,
         "pendingTasks": pending_count, 
-        "storageUsed": storage_str
+        "storageUsed": total_bytes
     }
 
 

@@ -409,11 +409,11 @@ const onL2InputInput = () => {
     <!-- EDIT MODE - Modal Overlay -->
     <div
       v-if="isEditing"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/10"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/20 backdrop-blur-[1px]"
       @click.self="onModalBackdropClick"
     >
       <div
-        class="bg-white rounded-lg shadow-2xl p-4 w-full max-w-md mx-4"
+        class="bg-white rounded-xl shadow-2xl border border-slate-100 p-5 w-full max-w-sm mx-auto animate-in fade-in zoom-in-95 duration-200"
         @click.stop
         @keydown="handleKeydown"
       >

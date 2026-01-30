@@ -30,7 +30,7 @@ export interface StatsResponse {
     totalFiles: number;
     todayUploads: number;
     pendingTasks: number;
-    storageUsed: string;
+    storageUsed: number;
 }
 
 export interface FilesQueryParams {
@@ -62,7 +62,7 @@ export const fileService = {
                 totalFiles: 1251,
                 todayUploads: 33,
                 pendingTasks: 6,
-                storageUsed: '450 GB'
+                storageUsed: 483183820800 // 450 GB
             };
         }
 
