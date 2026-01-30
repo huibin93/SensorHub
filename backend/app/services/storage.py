@@ -174,3 +174,117 @@ class StorageService:
        Deprecated: Use delete_physical_file(hash) instead.
        """
        pass
+
+    @staticmethod
+    def read_zstd_file(file_hash: str, offset: int = 0, limit_bytes: int = 1024 * 1024) -> dict:
+        """
+        读取 Zstd 压缩文件的内容（分段读取）;
+        
+        Args:
+            file_hash: 文件 Hash (MD5);
+            offset: 从原始数据的哪个字节开始读取;
+            limit_bytes: 最多读取多少字节;
+            
+        Returns:
+            dict: {
+                "content": str,      # 解码后的文本内容
+                "offset": int,       # 本次读取的起始偏移量
+                "bytes_read": int,   # 本次实际读取的字节数
+                "total_size": int,   # 原始文件总大小
+                "has_more": bool     # 是否还有更多内容
+            }
+            
+        Raises:
+            FileNotFoundError: 文件不存在;
+            ValueError: offset 超出范围;
+            UnicodeDecodeError: 解码失败（非文本文件）;
+        """
+        import zstandard as zstd
+        
+        raw_path = StorageService.get_raw_path(file_hash)
+        if not raw_path.exists():
+            raise FileNotFoundError(f"File not found: {file_hash}")
+        
+        logger.info(f"Reading zstd file {file_hash} from offset {offset}, limit {limit_bytes}")
+        
+        dctx = zstd.ZstdDecompressor()
+        
+        try:
+            # 第一步：扫描整个文件以获取总大小（可能需要缓存优化）
+            total_size = 0
+            with raw_path.open('rb') as ifh:
+                with dctx.stream_reader(ifh) as reader:
+                    while True:
+                        chunk = reader.read(65536)
+                        if not chunk:
+                            break
+                        total_size += len(chunk)
+            
+            # 检查 offset 是否有效
+            if offset < 0:
+                raise ValueError("Offset cannot be negative")
+            if offset >= total_size:
+                # offset 超出文件末尾，返回空内容
+                return {
+                    "content": "",
+                    "offset": offset,
+                    "bytes_read": 0,
+                    "total_size": total_size,
+                    "has_more": False
+                }
+            
+            # 第二步：从指定 offset 开始读取内容
+            current_pos = 0
+            content_bytes = bytearray()
+            target_end = min(offset + limit_bytes, total_size)
+            
+            with raw_path.open('rb') as ifh:
+                with dctx.stream_reader(ifh) as reader:
+                    while current_pos < target_end:
+                        chunk_size = min(65536, target_end - current_pos)
+                        chunk = reader.read(chunk_size)
+                        if not chunk:
+                            break
+                        
+                        chunk_start = current_pos
+                        chunk_end = current_pos + len(chunk)
+                        
+                        # 判断是否在目标范围内
+                        if chunk_end > offset:
+                            # 计算实际需要的部分
+                            read_start = max(0, offset - chunk_start)
+                            read_end = min(len(chunk), target_end - chunk_start)
+                            content_bytes.extend(chunk[read_start:read_end])
+                        
+                        current_pos = chunk_end
+            
+            # 解码为文本
+            try:
+                content = content_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                # 尝试其他编码
+                try:
+                    content = content_bytes.decode('gbk')
+                    logger.warning(f"File {file_hash} decoded using GBK encoding")
+                except UnicodeDecodeError:
+                    raise UnicodeDecodeError(
+                        'utf-8', content_bytes[:100], 0, min(100, len(content_bytes)),
+                        'Unable to decode file content. File may not be a text file.'
+                    )
+            
+            bytes_read = len(content_bytes)
+            has_more = (offset + bytes_read) < total_size
+            
+            logger.info(f"Read {bytes_read} bytes from {file_hash}, has_more: {has_more}")
+            
+            return {
+                "content": content,
+                "offset": offset,
+                "bytes_read": bytes_read,
+                "total_size": total_size,
+                "has_more": has_more
+            }
+            
+        except Exception as e:
+            logger.error(f"Error reading zstd file {file_hash}: {e}")
+            raise

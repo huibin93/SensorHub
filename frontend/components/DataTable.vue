@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
+import { useRouter } from 'vue-router';
 import { 
   Search, Filter, ChevronDown, Eye, Download, MoreHorizontal, 
-  RotateCw, Play, Zap, Edit2, Watch, Circle, Trash2, ChevronLeft, ChevronRight 
+  RotateCw, Play, Zap, Edit2, Watch, Circle, Trash2, ChevronLeft, ChevronRight,
+  ExternalLink
 } from 'lucide-vue-next';
 import { SensorFile, FileStatus, DeviceType } from '../types';
 import StatusBadge from './StatusBadge.vue';
@@ -11,16 +13,20 @@ import EditableTestTypeCell from './EditableTestTypeCell.vue';
 import EditableNoteCell from './EditableNoteCell.vue';
 import EditableDeviceCell from './EditableDeviceCell.vue';
 import BatchEditModal from './BatchEditModal.vue';
+import FilePreviewDrawer from './FilePreviewDrawer.vue';
 import { useFileStore } from '../stores/fileStore';
 
 // ===== STORE =====
 const fileStore = useFileStore();
 const { files, isLoading } = storeToRefs(fileStore);
+const router = useRouter();
 
 // ===== LOCAL UI STATE =====
 const selectedIds = ref<Set<string>>(new Set());
 const activeRowMenu = ref<string | null>(null);
 const showBatchEditModal = ref(false);
+const contextMenuRow = ref<string | null>(null);
+const contextMenuPosition = ref({ x: 0, y: 0 });
 const filterDevice = ref<string>('All');
 const filterStatus = ref<string>('All');
 const searchQuery = ref('');
@@ -196,6 +202,50 @@ const handleClickOutside = (event: MouseEvent) => {
     if (activeRowMenu.value && !(event.target as Element).closest('.row-menu-container')) {
         activeRowMenu.value = null;
     }
+    if (contextMenuRow.value && !(event.target as Element).closest('.context-menu')) {
+        contextMenuRow.value = null;
+    }
+};
+
+// ===== RIGHT CLICK MENU =====
+const handleRightClick = (event: MouseEvent, rowId: string) => {
+    event.preventDefault();
+    contextMenuPosition.value = { x: event.clientX, y: event.clientY };
+    contextMenuRow.value = rowId;
+};
+
+// Drawer State
+const isDrawerOpen = ref(false);
+const previewFileId = ref<string | null>(null);
+
+// ===== ACTIONS =====
+const viewFile = (id: string, event?: Event) => {
+    // If Ctrl/Cmd click, open in new tab directly
+    if (event && (event.ctrlKey || event.metaKey)) {
+        openInNewTab(id);
+        return;
+    }
+    
+    // Otherwise open drawer preview
+    previewFileId.value = id;
+    isDrawerOpen.value = true;
+};
+
+const openInNewTab = (id: string) => {
+    const routeData = router.resolve({ name: 'FileContent', params: { id } });
+    window.open(routeData.href, '_blank');
+};
+
+const closeDrawer = () => {
+    isDrawerOpen.value = false;
+    setTimeout(() => {
+        previewFileId.value = null;
+    }, 300); // Clear after animation
+};
+
+const openInNewPage = (rowId: string) => {
+    openInNewTab(rowId);
+    contextMenuRow.value = null;
 };
 
 </script>
@@ -327,10 +377,30 @@ const handleClickOutside = (event: MouseEvent) => {
             <td class="px-4 py-3 whitespace-nowrap">
                 <StatusBadge :status="row.status" :error="row.errorMessage" />
             </td>
-            <td class="px-4 py-3">
-                <span class="text-sm font-bold text-slate-800">
+            <td class="px-4 py-3 relative">
+                <span 
+                    @click="viewFile(row.id, $event)"
+                    @contextmenu="handleRightClick($event, row.id)"
+                    class="text-sm font-bold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors select-text block w-full truncate"
+                    title="Click to preview, Ctrl+Click to open in new tab"
+                >
                     {{ row.filename.replace(/\.rawdata$/i, '') }}{{ row.nameSuffix || '' }}
                 </span>
+                
+                <!-- Context Menu -->
+                <div 
+                    v-if="contextMenuRow === row.id"
+                    class="context-menu fixed bg-white border border-slate-200 rounded-lg shadow-xl z-50 py-1 min-w-[180px]"
+                    :style="{ left: contextMenuPosition.x + 'px', top: contextMenuPosition.y + 'px' }"
+                >
+                    <button
+                    @click="openInNewTab(row.id); contextMenuRow = null"
+                    class="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                >
+                        <ExternalLink :size="16" />
+                        View in new page
+                    </button>
+                </div>
             </td>
             <td class="px-4 py-3 whitespace-nowrap">
                 <div class="flex flex-col">
@@ -521,6 +591,13 @@ const handleClickOutside = (event: MouseEvent) => {
         :selected-count="selectedIds.size"
         @close="showBatchEditModal = false"
         @confirm="onBatchEditConfirm"
+    />
+
+    <!-- File Preview Drawer -->
+    <FilePreviewDrawer 
+        :is-open="isDrawerOpen" 
+        :id="previewFileId"
+        @close="closeDrawer"
     />
   </div>
 </template>

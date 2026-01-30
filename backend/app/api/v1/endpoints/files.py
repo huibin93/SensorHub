@@ -634,3 +634,69 @@ def trigger_parse(
     crud.update_file(session, file_id, {"status": "Processed"})
 
     return {"status": "Processed", "message": "Parse completed"}
+
+
+@router.get("/files/{file_id}/content")
+async def get_file_content_stream(
+    file_id: str,
+    session: Session = Depends(deps.get_db)
+):
+    """
+    获取文件压缩数据流（前端解压）;
+    
+    返回原始的 .zst 压缩文件，前端使用 zstd-wasm 解压;
+    
+    Returns:
+        StreamingResponse: .zst 压缩数据流
+        
+    Headers:
+        - Content-Type: application/zstd
+        - X-File-Name: 原始文件名
+        - X-Original-Size: 原始文件大小（字节）
+        - X-Compressed-Size: 压缩文件大小（字节）
+    
+    Raises:
+        HTTPException: 文件不存在(404)、物理文件缺失(404);
+    """
+    from fastapi.responses import StreamingResponse
+    import os
+    
+    # 获取文件记录
+    file = crud.get_file(session, file_id)
+    if not file:
+        raise HTTPException(404, "File not found")
+    
+    # 获取物理文件路径
+    raw_path = StorageService.get_raw_path(file.file_hash)
+    if not raw_path.exists():
+        logger.error(f"Physical file not found for {file_id}: {raw_path}")
+        raise HTTPException(404, "Physical file not found")
+    
+    # 获取文件大小
+    compressed_size = os.path.getsize(raw_path)
+    
+    # 获取原始大小（从 SensorFile.file_size_bytes）
+    original_size = file.file_size_bytes if file.file_size_bytes > 0 else compressed_size
+    
+    # 定义流式生成器
+    async def stream_compressed_file():
+        """流式读取压缩文件"""
+        chunk_size = 64 * 1024  # 64KB chunks
+        with open(raw_path, 'rb') as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+    
+    # 返回流式响应
+    return StreamingResponse(
+        stream_compressed_file(),
+        media_type="application/zstd",
+        headers={
+            "X-File-Name": file.filename,
+            "X-Original-Size": str(original_size),
+            "X-Compressed-Size": str(compressed_size),
+            "Content-Disposition": f'inline; filename="{file.filename}.zst"'
+        }
+    )

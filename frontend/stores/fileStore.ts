@@ -375,6 +375,19 @@ export const useFileStore = defineStore('files', () => {
         return { success: successCount, failed: failCount };
     }
 
+    /**
+     * Fetch file content (分段读取)
+     */
+    async function fetchFileContent(id: string, offset: number = 0, limit: number = 1024 * 1024) {
+        try {
+            const response = await fileService.getFileContent(id, offset, limit);
+            return response;
+        } catch (e) {
+            console.error('[FileStore] Failed to fetch file content:', e);
+            throw e;
+        }
+    }
+
     return {
         // State
         files,
@@ -394,5 +407,6 @@ export const useFileStore = defineStore('files', () => {
         downloadFile,
         batchDownload,
         batchUpdate,
+        fetchFileContent,
     };
 });

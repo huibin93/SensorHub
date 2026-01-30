@@ -1,0 +1,6 @@
+{
+    "preview": {
+        "maxChunks": 20,
+        "chunkSize": 65536
+    }
+}

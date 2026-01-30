@@ -3,7 +3,8 @@ import { ref, computed, onUnmounted } from 'vue';
 import { Network, Search, Hash, DownloadCloud, AlertCircle, CheckCircle2, Server, Wifi, Loader2, XCircle, Filter } from 'lucide-vue-next';
 import { api } from '../services/api';
 
-const deviceUrl = ref('http://192.168.50.168:8080'); // Default User URL
+const deviceIp = ref('192.168.50.168');
+const devicePort = ref('8080');
 const isConnecting = ref(false);
 const errorMsg = ref('');
 const fileList = ref<any[]>([]);
@@ -109,8 +110,9 @@ const connectDevice = async (isPolling = false) => {
     }
     errorMsg.value = '';
     
+    const fullUrl = `http://${deviceIp.value}:${devicePort.value}`;
     try {
-        const res = await api.get('/devices/list', { params: { url: deviceUrl.value } });
+        const res = await api.get('/devices/list', { params: { url: fullUrl } });
         const newItems = res.data.items.map((item: any) => ({
             ...item,
             meta: parseFilename(item.filename)
@@ -245,8 +247,9 @@ const importSelected = async () => {
     selectedFiles.value.clear(); 
     
     try {
+        const fullUrl = `http://${deviceIp.value}:${devicePort.value}`;
         await api.post('/devices/import', {
-            device_ip: deviceUrl.value,
+            device_ip: fullUrl,
             files: filesToImport
         });
         startPolling();
@@ -300,17 +303,27 @@ onUnmounted(() => {
 
         <!-- Connection Bar -->
         <div class="mt-6 flex gap-3 max-w-2xl">
-            <!-- ... URL Input ... -->
+            <!-- IP Input -->
             <div class="flex-1 relative group">
                 <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors">
                     <Server :size="16" />
                 </div>
                 <input 
-                    v-model="deviceUrl"
+                    v-model="deviceIp"
                     type="text" 
-                    placeholder="http://192.168.x.x:8080"
+                    placeholder="192.168.x.x"
                     @keyup.enter="() => connectDevice(false)"
                     class="w-full pl-9 pr-4 py-2.5 text-sm font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm placeholder:text-slate-400"
+                />
+            </div>
+            <!-- Port Input -->
+            <div class="w-24 relative group">
+                <input 
+                    v-model="devicePort"
+                    type="text" 
+                    placeholder="8080"
+                    @keyup.enter="() => connectDevice(false)"
+                    class="w-full px-4 py-2.5 text-sm font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm placeholder:text-slate-400 text-center"
                 />
             </div>
             <button 
@@ -426,9 +439,12 @@ onUnmounted(() => {
                         <div class="font-medium text-slate-700 font-mono text-xs truncate" :title="file.filename">
                             {{ file.filename }}
                         </div>
-                        <div v-if="file.meta" class="flex gap-2 mt-1 text-[10px] text-slate-400">
-                             <span class="bg-slate-100 px-1 rounded border border-slate-200">{{ file.meta.mode }}</span>
-                             <span class="bg-slate-100 px-1 rounded border border-slate-200">{{ file.meta.label }}</span>
+                        <div class="flex gap-2 mt-1 text-[10px] text-slate-400 items-center">
+                            <template v-if="file.meta">
+                                <span class="bg-slate-100 px-1 rounded border border-slate-200">{{ file.meta.mode }}</span>
+                                <span class="bg-slate-100 px-1 rounded border border-slate-200">{{ file.meta.label }}</span>
+                            </template>
+                            <span v-if="file.size && file.size !== 'Unknown'" class="bg-slate-100 px-1 rounded border border-slate-200 font-mono">{{ file.size }}</span>
                         </div>
                     </div>
                     <div class="col-span-2 min-w-0 flex flex-col gap-1">

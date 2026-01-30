@@ -14,7 +14,7 @@ import { ZipWriter } from '@zip.js/zip.js';
 
 // ===== CONFIGURATION (from .env) =====
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 // ===== TYPE DEFINITIONS =====
 export interface FileUpdatePayload {
@@ -447,6 +447,34 @@ export const fileService = {
         }
 
         const response = await axios.post(`${API_BASE_URL}/files/${id}/parse`, { options });
+        return response.data;
+    },
+
+    /**
+     * Get file content (分段读取)
+     */
+    async getFileContent(id: string, offset: number = 0, limit: number = 1024 * 1024): Promise<{
+        content: string;
+        offset: number;
+        bytesRead: number;
+        totalSize: number;
+        hasMore: boolean;
+        filename: string;
+    }> {
+        if (USE_MOCK) {
+            return {
+                content: 'Mock file content...',
+                offset: 0,
+                bytesRead: 100,
+                totalSize: 100,
+                hasMore: false,
+                filename: 'mock_file.rawdata'
+            };
+        }
+
+        const response = await axios.get(`${API_BASE_URL}/files/${id}/content`, {
+            params: { offset, limit }
+        });
         return response.data;
     }
 };
