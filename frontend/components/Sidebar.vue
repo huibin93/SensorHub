@@ -21,6 +21,7 @@ const menuItems = [
   { label: 'Device Import', icon: Network, id: 'device' },
   { label: 'Algorithm Analysis', icon: Activity, id: 'algo' },
   { label: 'Report Center', icon: FileText, id: 'report' },
+  { label: 'Serial Tool', icon: LayoutDashboard, id: 'serial' },
   { label: 'Settings', icon: Settings, id: 'settings' },
 ];
 </script>

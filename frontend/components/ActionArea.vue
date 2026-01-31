@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { UploadCloud, FileText, Database, CheckCircle, Clock, Loader2, X, Check } from 'lucide-vue-next';
+import { UploadCloud, FileText, Database, CheckCircle, Clock, X } from 'lucide-vue-next';
 import { useFileStore } from '../stores/fileStore';
 import { fileService } from '../services/fileService';
 import { ref, onMounted, onUnmounted } from 'vue';
 import ZstdWorker from '../workers/zstd.worker.js?worker';
+import UploadQueueOverlay from './UploadQueueOverlay.vue';
 
 import { v4 as uuidv4 } from 'uuid';
 
@@ -12,12 +13,11 @@ import { formatBytes, formatBytesSplit } from '../utils/format';
 
 const fileStore = useFileStore();
 
+// Upload Queue Overlay ref
+const uploadQueueRef = ref<InstanceType<typeof UploadQueueOverlay>>();
+
 // Upload state
 const isDragging = ref(false);
-const isUploading = ref(false);
-const uploadProgress = ref(0);
-const uploadStatus = ref('idle');
-const uploadMessage = ref('');
 const fileInputRef = ref(null) as any;
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
@@ -87,32 +87,19 @@ const validateFile = async (file: File): Promise<boolean> => {
 const handleFileSelect = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
 
-    // Reset UI State if not already uploading
-    if (!isUploading.value) {
-        uploadStatus.value = 'idle';
-        uploadMessage.value = '';
-        uploadProgress.value = 0;
-    }
-
     const fileArray = Array.from(files);
     let hasValidFiles = false;
     
-    try {
-        for (const file of fileArray) {
-            const ext = file.name.split('.').pop()?.toLowerCase();
+    // 为每个文件单独处理，避免一个文件错误影响其他文件
+    for (const file of fileArray) {
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        
+        try {
             if (ext === 'zip') {
                 hasValidFiles = true;
-                if (!isUploading.value) {
-                     isUploading.value = true;
-                     uploadStatus.value = 'uploading';
-                }
                 await handleZipFile(file);
             } else if (ext === 'rawdata') {
                 hasValidFiles = true;
-                if (!isUploading.value) {
-                     isUploading.value = true;
-                     uploadStatus.value = 'uploading';
-                }
                 
                 // Content Validation before processing
                 // 处理前进行内容校验
@@ -127,42 +114,24 @@ const handleFileSelect = async (files: FileList | File[] | null) => {
                 console.warn(`Skipped unsupported file: ${file.name}`);
                 addToast(`Skipped ${file.name}: Only .rawdata or .zip allowed`, 'error');
             }
+        } catch (e) {
+            // 单个文件处理失败，记录错误但继续处理其他文件
+            console.error(`[File Process Error] ${file.name}:`, e);
+            const errorMsg = e instanceof Error ? e.message : 'Processing failed';
+            addToast(`${file.name}: ${errorMsg}`, 'error');
         }
-        
-        if (hasValidFiles) {
-            // Final success state if all went well
-            uploadStatus.value = 'success';
-            uploadMessage.value = 'All tasks complete!';
-
-            // Refresh Data
-            await fileStore.fetchFiles();
-            await fileStore.fetchStats();
-
-            setTimeout(() => { 
-                uploadStatus.value = 'idle'; 
-                isUploading.value = false;
-            }, 2000);
-        } else if (fileArray.length === 1 && !hasValidFiles) {
-             // If user selected only 1 file and it was invalid, show error on card too?
-             // But Toast is enough. We can reset card.
-             uploadStatus.value = 'idle'; 
-        }
-
-    } catch (e) {
-        console.error(e);
-        uploadStatus.value = 'error';
-        uploadMessage.value = e instanceof Error ? e.message : 'Upload failed';
-        addToast(uploadMessage.value, 'error');
-        setTimeout(() => { 
-            uploadStatus.value = 'idle'; 
-            isUploading.value = false;
-        }, 5000);
+    }
+    
+    if (hasValidFiles) {
+        // Refresh Data after all uploads complete
+        await fileStore.fetchFiles();
+        await fileStore.fetchStats();
     }
 };
 
 // Handle ZIP processing (Serial extraction & upload)
 const handleZipFile = async (zipFile: File) => {
-    uploadMessage.value = `Analyzing ${zipFile.name}...`;
+    console.log(`[Zip] Analyzing ${zipFile.name}...`);
     const unzipStart = performance.now();
     
     // Default password from env
@@ -224,45 +193,61 @@ const handleZipFile = async (zipFile: File) => {
         const unzipEnd = performance.now();
         console.log(`[Unzip] Analysis took ${(unzipEnd - unzipStart).toFixed(0)}ms`);
 
-        // 3. Extract and Process
+        // 3. Extract and Process - 为每个文件创建队列任务
         let count = 0;
         for (const entry of validEntries) {
             count++;
-            uploadMessage.value = `[${count}/${validEntries.length}] Unzipping ${entry.filename}...`;
-            
-            const extractStart = performance.now();
-            let blob: Blob;
-
-            try {
-                const cleanPassword = defaultPassword.trim();
-                
-                // Configure zip.js to run on main thread for better error visibility
-                // @ts-ignore
-                if (window.zip) {
-                     // @ts-ignore
-                    window.zip.configure({ useWebWorkers: false });
-                }
-
-                blob = await entry.getData(new BlobWriter(), { 
-                    password: entry.encrypted ? cleanPassword : undefined 
-                });
-            } catch (err: any) {
-                // Check for password error
-                if (err.message && (err.message.includes("Password") || err.message.includes("Encrypted"))) {
-                    throw new Error(`解密失败: ${entry.filename} 是加密文件，且默认密码无法解密。请手动解压。`);
-                }
-                throw err;
-            }
-
-            const extractEnd = performance.now();
-            console.log(`[Unzip] Extracted ${entry.filename} in ${(extractEnd - extractStart).toFixed(0)}ms`);
-
-            // Clean filename
             const cleanName = entry.filename.split('/').pop() || entry.filename;
-            const file = new File([blob], cleanName);
             
-            await processAndUpload(file);
+            // 为解压文件创建队列任务
+            const taskId = uploadQueueRef.value?.addTask(cleanName, entry.uncompressedSize) || '';
+            
+            try {
+                console.log(`[Zip] [${count}/${validEntries.length}] Unzipping ${entry.filename}...`);
+                uploadQueueRef.value?.updateProgress(taskId, 5);
+                
+                const extractStart = performance.now();
+                let blob: Blob;
 
+                try {
+                    const cleanPassword = defaultPassword.trim();
+                    
+                    // Configure zip.js to run on main thread for better error visibility
+                    // @ts-ignore
+                    if (window.zip) {
+                         // @ts-ignore
+                        window.zip.configure({ useWebWorkers: false });
+                    }
+
+                    blob = await entry.getData(new BlobWriter(), { 
+                        password: entry.encrypted ? cleanPassword : undefined 
+                    });
+                    
+                    uploadQueueRef.value?.updateProgress(taskId, 20); // 解压完成
+                } catch (err: any) {
+                    // Check for password error
+                    if (err.message && (err.message.includes("Password") || err.message.includes("Encrypted"))) {
+                        const errorMsg = `解密失败: ${entry.filename} 是加密文件，且默认密码无法解密。请手动解压。`;
+                        uploadQueueRef.value?.markError(taskId, errorMsg);
+                        throw new Error(errorMsg);
+                    }
+                    uploadQueueRef.value?.markError(taskId, err.message || 'Extraction failed');
+                    throw err;
+                }
+
+                const extractEnd = performance.now();
+                console.log(`[Unzip] Extracted ${entry.filename} in ${(extractEnd - extractStart).toFixed(0)}ms`);
+
+                // 创建文件对象并上传
+                const file = new File([blob], cleanName);
+                
+                // 调用上传函数，但使用现有的 taskId
+                await processAndUploadWithTask(file, taskId);
+
+            } catch (err: any) {
+                console.error(`[Zip Extract Error] ${cleanName}:`, err);
+                // 错误已在上面标记
+            }
         }
 
         await zipReader.close();
@@ -274,103 +259,114 @@ const handleZipFile = async (zipFile: File) => {
     }
 };
 
-// Core Upload Pipeline (Single File)
-const processAndUpload = async (file: File) => {
+// Core Upload Pipeline with existing taskId (for ZIP extraction)
+const processAndUploadWithTask = async (file: File, taskId: string) => {
     const filename = file.name;
     console.log(`[Upload] Starting process for: ${filename}`); // 开始处理文件
     
-    // 0. Fast Deduplication Check (Name + Size)
-    // 快速去重检查 (文件名前置过滤)
-    // 如果同名且同大小，直接跳过 MD5 计算
-    uploadMessage.value = `Pre-checking ${filename}...`;
-    const fastCheckUrl = `${API_BASE_URL}/files/check?filename=${encodeURIComponent(filename)}&size=${file.size}`;
     try {
-        const fastRes = await fetch(fastCheckUrl);
-        const fastData = await fastRes.json();
+        // 0. Fast Deduplication Check (Name + Size)
+        uploadQueueRef.value?.updateProgress(taskId, 25);
         
-        if (fastData.exists && fastData.exact_match) {
-             console.log(`[ActionArea] Fast Check: ${filename} (Size: ${file.size}) exists. Skipping.`);
-             uploadMessage.value = `[Fast Skip] ${filename} already exists.`;
-             addToast(`${filename} skipped (Fast Check)`, 'success');
-             await new Promise(r => setTimeout(r, 1000));
-             return;
+        const fastCheckUrl = `${API_BASE_URL}/files/check?filename=${encodeURIComponent(filename)}&size=${file.size}`;
+        try {
+            const fastRes = await fetch(fastCheckUrl);
+            const fastData = await fastRes.json();
+            
+            if (fastData.exists && fastData.exact_match) {
+                 console.log(`[ActionArea] Fast Check: ${filename} (Size: ${file.size}) exists. Skipping.`);
+                 uploadQueueRef.value?.markCompleted(taskId, 'Already exists');
+                 addToast(`${filename} skipped (Fast Check)`, 'success');
+                 return;
+            }
+        } catch (err) {
+            console.warn("[ActionArea] Fast Check failed, proceeding to MD5.", err);
         }
-    } catch (err) {
-        console.warn("[ActionArea] Fast Check failed, proceeding to MD5.", err);
-    }
 
-    uploadMessage.value = `Processing ${filename}...`;
+        uploadQueueRef.value?.updateProgress(taskId, 30);
 
-    // 1. Compute Hash
-    const hashStart = performance.now();
-    const { hash } = await callWorker('calcHash', { file });
-    const hashEnd = performance.now();
-    console.log(`[Hash] ${filename} MD5: ${hash} (${(hashEnd - hashStart).toFixed(0)}ms)`); // MD5 计算耗时日志
-    
-    // 2. Check Deduplication
-    // 2. Check Deduplication
-    uploadMessage.value = `Checking ${filename}...`;
-    // FIX: URL encode filename to handle special characters
-    const checkUrl = `${API_BASE_URL}/files/check?hash=${hash}&filename=${encodeURIComponent(filename)}`;
-    const checkRes = await fetch(checkUrl);
-    const checkData = await checkRes.json();
-    
-    if (checkData.exists) {
-        if (checkData.exact_match) {
-             console.log(`[ActionArea] Exact match found for ${filename}. Skipping upload.`);
-             uploadMessage.value = `[Skipped] ${filename} already exists.`;
-             addToast(`${filename} skipped (Already exists)`, 'success');
-             await new Promise(r => setTimeout(r, 1000)); // Show message briefly
-             return; // STOP HERE - Do not proceed to upload
-        }
+        // 1. Compute Hash
+        const hashStart = performance.now();
+        const { hash } = await callWorker('calcHash', { file });
+        const hashEnd = performance.now();
+        console.log(`[Hash] ${filename} MD5: ${hash} (${(hashEnd - hashStart).toFixed(0)}ms)`);
+        uploadQueueRef.value?.updateProgress(taskId, 45);
         
-        // Exists but different name -> Proceed (Seconds transmission)
-        console.log(`[ActionArea] Content exists but name differs. Creating new reference for ${filename}.`);
-        uploadMessage.value = `[Fast Link] Content exists. Linking...`;
+        // 2. Check Deduplication
+        const checkUrl = `${API_BASE_URL}/files/check?hash=${hash}&filename=${encodeURIComponent(filename)}`;
+        const checkRes = await fetch(checkUrl);
+        const checkData = await checkRes.json();
+        uploadQueueRef.value?.updateProgress(taskId, 50);
+        
+        if (checkData.exists) {
+            if (checkData.exact_match) {
+                 console.log(`[ActionArea] Exact match found for ${filename}. Skipping upload.`);
+                 uploadQueueRef.value?.markCompleted(taskId, 'Already exists');
+                 addToast(`${filename} skipped (Already exists)`, 'success');
+                 return;
+            }
+            
+            console.log(`[ActionArea] Content exists but name differs. Creating new reference for ${filename}.`);
+        }
+
+        // 3. Compress
+        uploadQueueRef.value?.updateProgress(taskId, 55);
+        
+        const compressStart = performance.now();
+        const { blob: compressedBlob } = await callWorker('compress', { file, level: 6 });
+        const compressEnd = performance.now();
+        const duration = (compressEnd - compressStart).toFixed(0);
+        const ratio = ((compressedBlob.size / file.size) * 100).toFixed(1);
+
+        console.log(
+            `[Compression] ${filename}\n` +
+            `  Time: ${duration}ms\n` + 
+            `  Raw: ${file.size} bytes\n` + 
+            `  Compressed: ${compressedBlob.size} bytes\n` + 
+            `  Ratio: ${ratio}%`
+        );
+        uploadQueueRef.value?.updateProgress(taskId, 70);
+
+        // 4. Upload
+        uploadQueueRef.value?.updateProgress(taskId, 75);
+        
+        const formData = new FormData();
+        formData.append('file', compressedBlob, filename + '.zst');
+        formData.append('md5', hash as string);
+        formData.append('filename', filename);
+        formData.append('original_size', String(file.size));
+        
+        const response = await fetch(`${API_BASE_URL}/files/upload`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        uploadQueueRef.value?.updateProgress(taskId, 95);
+        
+        if (!response.ok) {
+            throw new Error(`Failed to upload ${filename}: ${response.statusText}`);
+        }
+
+        const resData = await response.json();
+        
+        if (resData.data && resData.data.is_duplicate) {
+            uploadQueueRef.value?.markCompleted(taskId, 'Already exists');
+            addToast(`${filename} already exists (Skipped)`, 'success');
+        } else {
+            uploadQueueRef.value?.markCompleted(taskId, 'Upload complete');
+            addToast(`Uploaded ${filename}`, 'success');
+        }
+    } catch (error: any) {
+        console.error(`[Upload Error] ${filename}:`, error);
+        uploadQueueRef.value?.markError(taskId, error.message || 'Upload failed');
+        throw error;
     }
+};
 
-    // 3. Compress
-    uploadMessage.value = `Compressing ${filename}...`;
-    const compressStart = performance.now();
-    const { blob: compressedBlob } = await callWorker('compress', { file, level: 6 });
-    const compressEnd = performance.now();
-    const duration = (compressEnd - compressStart).toFixed(0);
-    const ratio = ((compressedBlob.size / file.size) * 100).toFixed(1);
-
-    console.log(
-        `[Compression] ${filename}\n` +
-        `  Time: ${duration}ms\n` + 
-        `  Raw: ${file.size} bytes\n` + 
-        `  Compressed: ${compressedBlob.size} bytes\n` + 
-        `  Ratio: ${ratio}%`
-    ); // 压缩耗时与数据统计日志
-
-    // 4. Upload
-    uploadMessage.value = `Uploading ${filename}...`;
-    const formData = new FormData();
-    formData.append('file', compressedBlob, filename + '.zst');
-    formData.append('md5', hash as string);
-    formData.append('filename', filename);
-    formData.append('original_size', String(file.size));
-    
-    const response = await fetch(`${API_BASE_URL}/files/upload`, {
-        method: 'POST',
-        body: formData
-    });
-    
-    if (!response.ok) {
-        throw new Error(`Failed to upload ${filename}: ${response.statusText}`);
-    }
-
-    const resData = await response.json();
-    
-    if (resData.data && resData.data.is_duplicate) {
-        uploadMessage.value = `[Exists] ${filename} already in DB.`;
-        addToast(`${filename} already exists (Skipped)`, 'success');
-    } else {
-        uploadMessage.value = `Uploaded ${filename}`;
-        addToast(`Uploaded ${filename}`, 'success');
-    }
+// Core Upload Pipeline (Single File) - wrapper that creates task
+const processAndUpload = async (file: File) => {
+    const taskId = uploadQueueRef.value?.addTask(file.name, file.size) || '';
+    await processAndUploadWithTask(file, taskId);
 };
 
 // Handle drag events
@@ -397,6 +393,9 @@ defineExpose({ handleFileSelect });
 </script>
 
 <template>
+  <!-- Upload Queue Overlay -->
+  <UploadQueueOverlay ref="uploadQueueRef" />
+  
   <!-- Toast Container -->
   <div class="fixed top-20 right-6 z-50 flex flex-col gap-2 pointer-events-none sticky-toast-container">
     <TransitionGroup 
@@ -413,7 +412,7 @@ defineExpose({ handleFileSelect });
         class="px-4 py-3 rounded-lg shadow-lg border pointer-events-auto flex items-center gap-2 min-w-[300px]"
         :class="toast.type === 'error' ? 'bg-white border-red-100 text-red-600' : 'bg-white border-green-100 text-green-600'"
       >
-         <component :is="toast.type === 'error' ? X : Check" :size="18" />
+         <component :is="toast.type === 'error' ? X : CheckCircle" :size="18" />
          <span class="text-sm font-medium">{{ toast.msg }}</span>
       </div>
     </TransitionGroup>
@@ -443,58 +442,20 @@ defineExpose({ handleFileSelect });
         @dragover="handleDragOver"
         @dragleave="handleDragLeave"
         @drop="handleDrop"
-        :disabled="isUploading"
-        class="w-full flex-1 group relative flex flex-col items-center justify-center py-6 px-4 rounded-2xl border border-dashed transition-all duration-300 shadow-sm min-h-[140px]"
-        :class="[
-          isDragging ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-slate-300 bg-white hover:border-blue-500 hover:bg-blue-50/10 hover:shadow-md',
-          isUploading ? 'cursor-wait' : 'cursor-pointer'
-        ]"
+        class="w-full flex-1 group relative flex flex-col items-center justify-center py-6 px-4 rounded-2xl border border-dashed transition-all duration-300 shadow-sm min-h-[140px] cursor-pointer"
+        :class="isDragging ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-slate-300 bg-white hover:border-blue-500 hover:bg-blue-50/10 hover:shadow-md'"
       >
-        <!-- Idle State -->
-        <template v-if="uploadStatus === 'idle'">
-          <div class="p-3 bg-blue-50 text-blue-600 rounded-full mb-3 group-hover:bg-blue-600 group-hover:text-white group-hover:scale-110 transition-all duration-300 shadow-sm shadow-blue-100">
-              <UploadCloud :size="24" />
-          </div>
-          <h3 class="text-lg font-bold text-slate-800 mb-1 text-center">
-            {{ isDragging ? 'Drop file here' : 'Upload Data' }}
-          </h3>
-          <p class="text-xs text-slate-400 mb-3 text-center font-medium">Support .rawdata or .zip files</p>
-          <div class="flex gap-2 flex-wrap justify-center">
-            <span class="text-[10px] font-semibold text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-full border border-slate-200">.rawdata</span>
-            <span class="text-[10px] font-semibold text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-full border border-slate-200">.zip</span>
-          </div>
-        </template>
-        
-        <!-- Uploading State -->
-        <template v-else-if="uploadStatus === 'uploading'">
-          <div class="p-3 bg-blue-100 text-blue-600 rounded-full mb-3 animate-pulse">
-              <Loader2 :size="24" class="animate-spin" />
-          </div>
-          <h3 class="text-lg font-bold text-blue-600 mb-1 text-center">Uploading...</h3>
-          <p class="text-xs text-slate-500 mb-3 text-center font-medium">{{ uploadMessage }}</p>
-          <div class="w-48 h-2 bg-slate-200 rounded-full overflow-hidden">
-            <div 
-              class="h-full bg-blue-500 transition-all duration-300"
-              :style="{ width: '100%' }" 
-            ></div>
-          </div>
-        </template>
-        
-        <!-- Success State -->
-        <template v-else-if="uploadStatus === 'success'">
-          <div class="p-3 bg-green-100 text-green-600 rounded-full mb-3">
-              <Check :size="24" />
-          </div>
-          <h3 class="text-lg font-bold text-green-600 mb-1 text-center">{{ uploadMessage }}</h3>
-        </template>
-        
-        <!-- Error State -->
-        <template v-else-if="uploadStatus === 'error'">
-          <div class="p-3 bg-red-100 text-red-600 rounded-full mb-3">
-              <X :size="24" />
-          </div>
-          <h3 class="text-lg font-bold text-red-600 mb-1 text-center">{{ uploadMessage }}</h3>
-        </template>
+        <div class="p-3 bg-blue-50 text-blue-600 rounded-full mb-3 group-hover:bg-blue-600 group-hover:text-white group-hover:scale-110 transition-all duration-300 shadow-sm shadow-blue-100">
+            <UploadCloud :size="24" />
+        </div>
+        <h3 class="text-lg font-bold text-slate-800 mb-1 text-center">
+          {{ isDragging ? 'Drop here' : 'Upload Data' }}
+        </h3>
+        <p class="text-xs text-slate-400 mb-3 text-center font-medium">Support .rawdata, .zip files or folders</p>
+        <div class="flex gap-2 flex-wrap justify-center">
+          <span class="text-[10px] font-semibold text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-full border border-slate-200">.rawdata</span>
+          <span class="text-[10px] font-semibold text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-full border border-slate-200">.zip</span>
+        </div>
       </button>
     </div>
 

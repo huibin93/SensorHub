@@ -1,11 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, inject, onMounted } from 'vue';
 import ActionArea from '../components/ActionArea.vue';
 import DataTable from '../components/DataTable.vue';
 
 const actionAreaRef = ref();
 
-// Expose method for external file upload trigger (from drag-drop)
+// 从 DefaultLayout 注入注册函数
+const registerFileDropHandler = inject<(handler: (files: FileList) => void) => void>('registerFileDropHandler');
+
+// 注册文件处理器
+onMounted(() => {
+  if (registerFileDropHandler && actionAreaRef.value) {
+    registerFileDropHandler((files: FileList) => {
+      actionAreaRef.value.handleFileSelect(files);
+    });
+  }
+});
+
+// 保留 expose 以支持其他方式调用
 defineExpose({
   handleFileSelect: (files: FileList) => {
     if (actionAreaRef.value) {

@@ -5,6 +5,7 @@ const HomePage = () => import('../pages/HomePage.vue');
 const DataManagementPage = () => import('../pages/DataManagementPage.vue');
 const DeviceImportPage = () => import('../pages/DeviceImportPage.vue');
 const FileContentView = () => import('../pages/FileContentView.vue');
+const SerialToolPage = () => import('../pages/SerialToolPage.vue');
 
 const router = createRouter({
     history: createWebHistory(),
@@ -37,6 +38,11 @@ const router = createRouter({
                     path: 'settings',
                     name: 'Settings',
                     component: () => import('../pages/PlaceholderPage.vue'),
+                },
+                {
+                    path: 'serial-tool',
+                    name: 'SerialTool',
+                    component: SerialToolPage,
                 },
             ],
         },
