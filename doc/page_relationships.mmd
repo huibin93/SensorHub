@@ -1,0 +1,40 @@
+flowchart TB
+    subgraph "Navigation & Layout"
+        DefaultLayout["DefaultLayout.vue<br/>(Main Shell)"]
+        Sidebar["Sidebar.vue<br/>(Navigation)"]
+    end
+
+    subgraph "Data Management View"
+        DMP["DataManagementPage.vue<br/>(Main Feature Page)"]
+        AA["ActionArea.vue<br/>(Stats & Upload)"]
+        DT["DataTable.vue<br/>(Core List)"]
+        
+        subgraph "Modals & Drawers"
+            FPD["FilePreviewDrawer.vue<br/>(Side Preview)"]
+            BEM["BatchEditModal.vue<br/>(Multi-select Edit)"]
+        end
+    end
+
+    subgraph "Serial Tool View"
+        STP["SerialToolPage.vue<br/>(Serial Monitor)"]
+        SW["serialReader.worker.ts<br/>(Web Worker)"]
+    end
+
+    DefaultLayout --> Sidebar
+    DefaultLayout --> DMP
+    DefaultLayout --> STP
+
+    DMP --> AA
+    DMP --> DT
+    DT --> FPD
+    DT --> BEM
+    
+    STP -.-> SW
+
+    classDef page fill:#f9f9ff,stroke:#333,stroke-width:2px;
+    classDef component fill:#e1f5fe,stroke:#01579b,stroke-width:1px;
+    classDef worker fill:#fff3e0,stroke:#e65100,stroke-dasharray: 5 5;
+    
+    class DMP,STP page;
+    class AA,DT,FPD,BEM,Sidebar,DefaultLayout component;
+    class SW worker;

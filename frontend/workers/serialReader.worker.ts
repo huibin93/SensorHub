@@ -8,7 +8,8 @@
 // 消息类型定义
 type WorkerMessage =
     | { type: 'START'; stream: ReadableStream<Uint8Array> }
-    | { type: 'STOP' };
+    | { type: 'STOP' }
+    | { type: 'PING' }; // 用于检测 Worker 活跃状态
 
 let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 let keepReading = false;
@@ -117,6 +118,15 @@ async function readLoop(stream: ReadableStream<Uint8Array>) {
                     console.log('[SerialWorker] Read aborted.');
                     // Abort 通常是主动取消，keepReading 应该已经被置为 false
                     break;
+                } else if (error.name === 'NetworkError' ||
+                    error.message?.includes('device has been lost') ||
+                    error.message?.includes('disconnected') ||
+                    error.message?.includes('The device has been lost')) {
+                    // 设备拔出检测
+                    console.error('[SerialWorker] Device disconnected');
+                    self.postMessage({ type: 'DEVICE_DISCONNECTED', message: 'Device was unplugged' });
+                    keepReading = false;
+                    break;
                 } else {
                     console.error('[SerialWorker] Read error:', error);
                     self.postMessage({ type: 'ERROR', message: error.message });
@@ -175,5 +185,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 // ignore cancel errors
             }
         }
+    } else if (type === 'PING') {
+        // 响应主线程的活跃检测
+        self.postMessage({ type: 'PONG' });
     }
 };

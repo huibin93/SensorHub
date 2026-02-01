@@ -3,7 +3,7 @@
  * 串口工具页面 - 简化版
  * 使用 Web Serial API 进行串口通信调试
  */
-import { ref, computed, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { Usb, Trash2, Download, Send, AlertCircle, X, Settings, Plus, Hash, Clock, ArrowUp, ArrowDown, Filter } from 'lucide-vue-next';
 
 // 串口状态
@@ -56,6 +56,11 @@ function initWorker() {
        }
     } else if (type === 'STOP_ACK') {
        console.log('[Worker] Stopped acknowledged');
+    } else if (type === 'DEVICE_DISCONNECTED') {
+       // Worker 检测到设备断开
+       console.warn('[Main] Device disconnected detected by Worker:', message);
+       forceCleanup();
+       showToastMessage('Device disconnected: ' + message);
     }
   };
 }
@@ -63,7 +68,58 @@ function initWorker() {
 // 在组件挂载时初始化 Workder
 initWorker();
 
+// 设备拔出事件监听
+function setupDisconnectListener() {
+  if ('serial' in navigator) {
+    (navigator as any).serial.addEventListener('disconnect', handlePortDisconnect);
+  }
+}
+
+function handlePortDisconnect(event: any) {
+  const disconnectedPort = event.target;
+  if (disconnectedPort === port.value) {
+    console.warn('[Serial] Device disconnected unexpectedly');
+    forceCleanup();
+    showToastMessage('Device unplugged unexpectedly');
+  }
+}
+
+function removeDisconnectListener() {
+  if ('serial' in navigator) {
+    (navigator as any).serial.removeEventListener('disconnect', handlePortDisconnect);
+  }
+}
+
+// 强制清理函数 (用于意外断开)
+async function forceCleanup() {
+  // 通知 Worker 停止
+  if (serialWorker.value) {
+    serialWorker.value.postMessage({ type: 'STOP' });
+    serialWorker.value.terminate();
+    serialWorker.value = null;
+    initWorker();
+  }
+  
+  // 清理写入器
+  if (writer.value) {
+    try { writer.value.releaseLock(); } catch (e) {}
+    writer.value = null;
+  }
+  
+  // 清理端口引用
+  port.value = null;
+  status.value = 'disconnected';
+  errorMessage.value = '';
+  isDisconnecting.value = false;
+}
+
+// 生命周期钩子
+onMounted(() => {
+  setupDisconnectListener();
+});
+
 onUnmounted(() => {
+  removeDisconnectListener();
   if (serialWorker.value) {
     serialWorker.value.terminate();
     serialWorker.value = null;
@@ -306,55 +362,61 @@ async function disconnect() {
   console.log('Disconnecting (Worker mode)...');
 
   try {
-    // 1. Writer 清理 (主线程负责)
-    if (writer.value) {
-      try {
-        await writer.value.close();
-      } catch (e) {}
-      try {
-        writer.value.releaseLock();
-      } catch (e) {}
-      writer.value = null;
-    }
-
-    // 2. Reader 清理 (通过 Worker 握手)
+    // 1. 先停止 Worker 读取 (释放 readable 流的锁)
     if (serialWorker.value) {
        // 发送 STOP 信号
        serialWorker.value.postMessage({ type: 'STOP' });
        
-       // 等待 ACK 或超时 (2秒)
+       // 等待 ACK 或超时 (3秒)
        await new Promise<void>((resolve) => {
          const timeout = setTimeout(() => {
             console.warn('Worker stop timeout, forcing close');
             resolve();
-         }, 2000);
+         }, 3000);
          
          const ackHandler = (e: MessageEvent) => {
            if (e.data.type === 'STOP_ACK') {
              clearTimeout(timeout);
              serialWorker.value?.removeEventListener('message', ackHandler);
+             console.log('Worker ACK received, stream lock released');
              resolve();
            }
          };
          serialWorker.value?.addEventListener('message', ackHandler);
        });
        
-       // 清理现有 Worker 实例以防万一，并重新创建以备下次连接
-       // (因为 stream 被转移了，Worker 状态可能复杂，重建是最安全的)
+       // 等待一小段时间确保流完全释放
+       await new Promise(r => setTimeout(r, 100));
+       
+       // 终止并重建 Worker
        serialWorker.value.terminate();
        serialWorker.value = null;
-       initWorker();
     }
 
-    // 3. 关闭端口
+    // 2. Writer 清理 (先释放锁，再 close)
+    if (writer.value) {
+      try {
+        writer.value.releaseLock();
+      } catch (e) {
+        console.warn('Writer releaseLock failed:', e);
+      }
+      writer.value = null;
+    }
+
+    // 3. 关闭端口 (流已解锁后才能关闭)
     if (port.value) {
       try {
         await port.value.close();
-      } catch (e) {
-        console.warn('Port close failed:', e);
+        console.log('Port closed successfully');
+      } catch (e: any) {
+        // 即使关闭失败也要清理引用
+        console.warn('Port close failed:', e.message);
       }
       port.value = null;
     }
+
+    // 4. 重建 Worker 以备下次连接
+    initWorker();
 
     status.value = 'disconnected';
     errorMessage.value = '';
@@ -362,6 +424,10 @@ async function disconnect() {
   } catch (error: any) {
     console.error('Disconnect error:', error);
     errorMessage.value = error.message || 'Error during disconnect';
+    // 即使出错也要重置状态
+    status.value = 'disconnected';
+    port.value = null;
+    writer.value = null;
   } finally {
     isDisconnecting.value = false;
   }
