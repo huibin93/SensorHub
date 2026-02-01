@@ -121,7 +121,7 @@ class StorageService:
                         if not chunk:
                             break
                         
-                        # Basic Magic Number Check (Reject PDF renamed as rawdata)
+                        # 基本魔术数字检查 (拒绝将 PDF 重命名为原始数据)
                         if first_chunk:
                             if chunk.startswith(b'%PDF'):
                                 logger.error(f"File {file_path} rejected: PDF signature detected.")
@@ -171,7 +171,7 @@ class StorageService:
     @staticmethod
     def delete_file(file_id: str) -> None:
        """
-       Deprecated: Use delete_physical_file(hash) instead.
+       已弃用: 请改用 delete_physical_file(hash)。
        """
        pass
 

@@ -5,13 +5,13 @@ from app.models.dictionary import TestType, TestSubType
 
 def parse_filename(filename: str) -> Dict[str, Any]:
     """
-    Parse filename for metadata.
-    Format: CollectionMode_Label_Tester_Date_Time_MAC.rawdata
-    Example: Wear_Wearing_yuyue_20251227_162142_0983.rawdata
+    从文件名中解析元数据。
+    格式: CollectionMode_Label_Tester_Date_Time_MAC.rawdata
+    示例: Wear_Wearing_yuyue_20251227_162142_0983.rawdata
     
-    Robustness:
-    - Requires at least 5 parts.
-    - Handles missing MAC (returns empty string).
+    鲁棒性:
+    - 要求至少有 5 个部分。
+    - 处理缺失的 MAC 地址 (返回空字符串)。
     """
     try:
         # Strip extension
@@ -27,7 +27,7 @@ def parse_filename(filename: str) -> Dict[str, Any]:
         date_str = parts[3]
         time_str = parts[4]
         
-        # MAC is optional/last
+        # MAC 地址可选/位于最后
         mac = parts[5] if len(parts) > 5 else ""
         
         # Formatting collection_time
@@ -50,12 +50,12 @@ def parse_filename(filename: str) -> Dict[str, Any]:
 
 def ensure_test_types_exist(session: Session, l1: str, l2: str):
     """
-    Ensure TestType (L1) and TestSubType (L2) exist in dictionary.
-    If not, create them.
+    确保字典中存在测试类型 (L1) 和测试子类型 (L2)。
+    如果不存在, 则创建它们。
     """
     if not l1: return
     
-    # 1. Check/Create L1
+    # 1. 检查/创建 L1
     tt = session.exec(select(TestType).where(TestType.id == l1)).first()
     if not tt:
         tt = TestType(id=l1, name=l1, description="Auto-created during import")
@@ -69,7 +69,7 @@ def ensure_test_types_exist(session: Session, l1: str, l2: str):
             logger.error(f"Failed to create TestType {l1}: {e}")
             return # Stop if L1 fails
 
-    # 2. Check/Create L2
+    # 2. 检查/创建 L2
     if not l2: return
     
     existing_l2 = session.exec(select(TestSubType).where(

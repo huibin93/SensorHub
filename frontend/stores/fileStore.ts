@@ -36,7 +36,7 @@ export const useFileStore = defineStore('files', () => {
     // ===== ACTIONS =====
 
     /**
-     * Fetch stats from backend
+     * 从后端获取统计信息
      */
     async function fetchStats() {
         try {
@@ -49,22 +49,22 @@ export const useFileStore = defineStore('files', () => {
     }
 
     /**
-     * Fetch files from service with pagination
+     * 从服务中获取分页文件
      */
     // Last fetch params for polling
     const lastFetchParams = ref<FilesQueryParams>({});
 
     /**
-     * Fetch files from service with pagination
+     * 从服务中获取分页文件
      */
     async function fetchFiles(params: { page?: number; limit?: number; search?: string; device?: string; status?: string } = {}) {
         isLoading.value = true;
         error.value = null;
 
-        // Smart param merging:
-        // 1. If explicit params provided -> use them & update cache
-        // 2. If empty params (polling/refresh) -> use cache
-        // 3. Default limit to 2000 for client-side pagination
+        // 智能参数合并:
+        // 1. 如果提供了明确的参数 -> 使用它们并更新缓存
+        // 2. 如果参数为空 (轮询/刷新) -> 使用缓存
+        // 3. 默认限制为 2000 以进行客户端分页
         if (Object.keys(params).length > 0) {
             lastFetchParams.value = { ...params };
         }
@@ -96,7 +96,7 @@ export const useFileStore = defineStore('files', () => {
     }
 
     /**
-     * Poll keys for unverified files
+     * 轮询未验证文件的状态
      */
     let pollTimeout: number | undefined;
     function checkPolling() {
@@ -112,7 +112,7 @@ export const useFileStore = defineStore('files', () => {
     }
 
     /**
-     * Update a file's notes
+     * 更新文件备注
      */
     async function updateNote(id: string, note: string) {
         console.log('[FileStore] updateNote called', { id, note });
@@ -130,7 +130,7 @@ export const useFileStore = defineStore('files', () => {
     }
 
     /**
-     * Update a file's device info
+     * 更新文件设备信息
      */
     async function updateDevice(id: string, deviceType: DeviceType, deviceModel: string) {
         console.log('[FileStore] updateDevice called', { id, deviceType, deviceModel });
@@ -151,7 +151,7 @@ export const useFileStore = defineStore('files', () => {
     }
 
     /**
-     * Update a file's test type
+     * 更新文件测试类型
      */
     async function updateTestType(id: string, l1: string, l2: string) {
         console.log('[FileStore] updateTestType called', { id, l1, l2 });
@@ -172,10 +172,10 @@ export const useFileStore = defineStore('files', () => {
     }
 
     /**
-     * Trigger parse for selected files
-     * 1. Call backend parse API
-     * 2. Show local progress animation (10MB/s estimate)
-     * 3. Poll backend for status change to 'Parsed'
+     * 触发选中文件的解析
+     * 1. 调用后端解析 API
+     * 2. 显示本地进度动画 (估计 10MB/s)
+     * 3. 轮询后端的 'Parsed' 状态变更
      */
     async function triggerParse(ids: string[]) {
         for (const id of ids) {
@@ -258,7 +258,7 @@ export const useFileStore = defineStore('files', () => {
     }
 
     /**
-     * Delete files by IDs
+     * 按 ID 列表删除文件
      */
     async function deleteFiles(ids: string[]) {
         const backup = [...files.value];
@@ -273,7 +273,7 @@ export const useFileStore = defineStore('files', () => {
     }
 
     /**
-     * Delete single file
+     * 删除单个文件
      */
     async function deleteFile(id: string) {
         const backup = [...files.value];
@@ -288,7 +288,7 @@ export const useFileStore = defineStore('files', () => {
     }
 
     /**
-     * Download single file
+     * 下载单个文件
      */
     async function downloadFile(id: string, filename: string) {
         console.log('[FileStore] Downloading file:', id, filename);
@@ -301,7 +301,7 @@ export const useFileStore = defineStore('files', () => {
     }
 
     /**
-     * Batch download files
+     * 批量下载文件
      */
     async function batchDownload(ids: string[]) {
         console.log('[FileStore] Batch downloading files:', ids.length);
@@ -323,8 +323,8 @@ export const useFileStore = defineStore('files', () => {
     }
 
     /**
-     * Batch update files
-     * Iterates through IDs and calls updateFile for each.
+     * 批量更新文件
+     * 遍历 ID 并为每个 ID 调用 updateFile。
      */
     async function batchUpdate(ids: string[], updates: {
         deviceType?: string;

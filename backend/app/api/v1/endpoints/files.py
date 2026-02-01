@@ -230,11 +230,11 @@ async def upload_file(
              processedDir=str(processed_dir)
          )
          
-         # Parse Metadata (Optional override for deduplication case? 
-         # Requirement says "Frontend file entry also needs parsing". 
-         # If strict exact match found, we skip return.
-         # But here we are creating a NEW SensorFile pointing to OLD physical file.
-         # So we SHOULD parse the NEW filename metadata.
+         # 解析元数据 (去重情况下的可选覆盖? 
+         # 需求说明 "前端文件入口也需要解析". 
+         # 如果找到严格的精确匹配, 我们跳过返回.
+         # 但在这里, 我们正在创建一个指向旧物理文件的新 SensorFile.
+         # 所以我们 应该 解析新的文件名元数据.
          meta = parse_filename(filename)
          new_sf.test_type_l1 = meta.get("test_type_l1", "Unknown")
          new_sf.test_type_l2 = meta.get("test_type_l2", "--")
@@ -376,7 +376,7 @@ def delete_file(file_id: str, session: Session = Depends(deps.get_db)) -> dict:
         dict: 删除结果;
     """
     crud.delete_file_safely(session, file_id)
-    # StorageService.delete_file(file_id) # Deprecated, handled in delete_file_safely
+    # StorageService.delete_file(file_id) # 已弃用, 已在 delete_file_safely 中处理
     return {"success": True}
 
 

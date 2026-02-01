@@ -81,7 +81,7 @@ class SensorFile(SQLModel, table=True):
     upload_time: str = Field(alias="uploadTime")
     packets: str = Field(default="[]")
 
-    # New Fields (Phase 6b)
+    # 新字段 (阶段 6b)
     tester: str = Field(default="")
     mac: str = Field(default="")
     collection_time: str = Field(default="") # 格式: YYYYMMDD_HHMMSS

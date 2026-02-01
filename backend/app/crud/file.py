@@ -229,7 +229,7 @@ def delete_file_safely(session: Session, file_id: str) -> bool:
 
 def delete_file(session: Session, file_id: str) -> None:
     """
-    Deprecated: Use delete_file_safely instead.
+    已弃用: 请改用 delete_file_safely。
     """
     delete_file_safely(session, file_id)
 

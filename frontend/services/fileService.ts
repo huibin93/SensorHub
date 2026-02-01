@@ -1,8 +1,8 @@
 /**
- * File Service Layer
+ * 文件服务层
  * 
- * Abstracts data fetching from the backend.
- * Configuration is read from environment variables (.env file)
+ * 抽象从后端获取数据的逻辑。
+ * 配置从环境变量 (.env 文件) 中读取
  */
 
 import axios from 'axios';
@@ -53,7 +53,7 @@ export interface PaginatedFilesResponse {
 // ===== SERVICE IMPLEMENTATION =====
 export const fileService = {
     /**
-     * Fetch system statistics
+     * 获取系统统计信息
      */
     async getStats(): Promise<StatsResponse> {
         if (USE_MOCK) {
@@ -71,7 +71,7 @@ export const fileService = {
     },
 
     /**
-     * Fetch paginated sensor files
+     * 获取分页的传感器文件
      */
     async getFiles(params: FilesQueryParams = {}): Promise<PaginatedFilesResponse> {
         if (USE_MOCK) {
@@ -100,13 +100,13 @@ export const fileService = {
     },
 
     /**
-     * Update a file by ID
+     * 按 ID 更新文件
      */
     async updateFile(id: string, data: FileUpdatePayload): Promise<SensorFile> {
         if (USE_MOCK) {
             await new Promise(resolve => setTimeout(resolve, 50));
             console.log('[FileService] Mock update:', id, data);
-            // In mock mode, we don't actually persist - Store handles local state
+            // 在模拟模式下, 我们不进行持久化 - Store 处理本地状态
             return {} as SensorFile;
         }
 
@@ -115,7 +115,7 @@ export const fileService = {
     },
 
     /**
-     * Delete a file by ID
+     * 按 ID 删除文件
      */
     async deleteFile(id: string): Promise<void> {
         if (USE_MOCK) {
@@ -128,7 +128,7 @@ export const fileService = {
     },
 
     /**
-     * Delete multiple files
+     * 删除多个文件
      */
     async deleteFiles(ids: string[]): Promise<void> {
         if (USE_MOCK) {
@@ -141,14 +141,14 @@ export const fileService = {
     },
 
     /**
-     * Upload a file with progress callback
+     * 上传文件并处理进度回调
      */
     async uploadFile(
         file: File,
         onProgress?: (percent: number) => void
     ): Promise<{ success: boolean; fileId: string; filename: string; message: string }> {
         if (USE_MOCK) {
-            // Simulate upload progress
+            // 模拟上传进度
             for (let i = 0; i <= 100; i += 10) {
                 await new Promise(resolve => setTimeout(resolve, 100));
                 if (onProgress) onProgress(i);
@@ -180,7 +180,7 @@ export const fileService = {
     },
 
     /**
-     * Get file structure (content_meta after parsing)
+     * 获取文件结构 (解析后的 content_meta)
      */
     async getFileStructure(id: string): Promise<{
         fileId: string;
@@ -205,7 +205,7 @@ export const fileService = {
     },
 
     /**
-     * Get parsed data for a specific key
+     * 获取指定键的解析数据
      */
     async getFileData(
         id: string,
@@ -232,7 +232,7 @@ export const fileService = {
     },
 
     /**
-     * Helper to trigger browser download
+     * 触发浏览器下载的助手函数
      */
     triggerDownload(blob: Blob, filename: string) {
         const url = window.URL.createObjectURL(blob);
@@ -246,7 +246,7 @@ export const fileService = {
     },
 
     /**
-     * Download a single file (Stream Decompress Zst on client)
+     * 下载单个文件 (在客户端流式解压 Zst)
      */
     async downloadFile(id: string, filename: string): Promise<void> {
         if (USE_MOCK) {
@@ -260,7 +260,7 @@ export const fileService = {
         try {
             console.log(`[Download] Starting stream for file ID: ${id}, Filename: ${filename}`);
 
-            // 1. Setup Stream Saver IMMEDIATELLY (User Request: Pop up save dialog first)
+            // 1. 立即设置 Stream Saver (用户需求: 先弹出保存对话框)
             console.log(`[Download] [${Math.round(performance.now() - startTime)}ms] Initializing StreamSaver...`);
             const fileStream = streamSaver.createWriteStream(filename);
             writer = fileStream.getWriter();
@@ -276,8 +276,8 @@ export const fileService = {
             }
             console.log(`[Download] [${Math.round(performance.now() - startTime)}ms] Stream received. Content-Length: ${response.headers.get('content-length') || 'unknown'}`);
 
-            // 3. Decompress & Pipe
-            // Custom TransformStream for fzstd
+            // 3. 解压并管道传输
+            // 用于 fzstd 的自定义 TransformStream
             console.log(`[Download] [${Math.round(performance.now() - startTime)}ms] Starting Decompression Pipeline...`);
             let decoder: Decompress;
 
@@ -334,7 +334,7 @@ export const fileService = {
     },
 
     /**
-     * Batch download multiple files as ZIP (Client-side Streaming)
+     * 批量下载多个文件为 ZIP (客户端流式处理)
      */
     async batchDownload(files: { id: string; filename: string; nameSuffix?: string }[]): Promise<void> {
         if (USE_MOCK) return;
@@ -350,11 +350,11 @@ export const fileService = {
             console.log(`[BatchDownload] [${Math.round(performance.now() - totalStartTime)}ms] Initializing ZIP stream: ${zipFilename}`);
             const fileStream = streamSaver.createWriteStream(zipFilename);
 
-            // 2. Setup ZipWriter
-            // ZipWriter writes to the streamSaver writable stream
+            // 2. 设置 ZipWriter
+            // ZipWriter 写入 streamSaver 可写流
             const zipWriter = new ZipWriter(fileStream);
 
-            // 3. Process each file sequentially
+            // 3. 按顺序处理每个文件
             let processedCount = 0;
             for (const file of files) {
                 const fileStartTime = performance.now();
@@ -379,7 +379,7 @@ export const fileService = {
                         throw new Error(`Failed to fetch ${name}: ${response.statusText}`);
                     }
 
-                    // Create Decompress Transform Stream
+                    // 创建解压转换流
                     let decoder: Decompress;
                     const decompressStream = new TransformStream({
                         start(controller) {
@@ -435,7 +435,7 @@ export const fileService = {
     },
 
     /**
-     * Trigger parsing for a file
+     * 触发文件解析
      */
     async triggerParse(id: string, options?: Record<string, unknown>): Promise<{
         success: boolean;
