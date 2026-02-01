@@ -100,7 +100,6 @@ class DownloadManager:
                 temp_path = temp_dir / f"temp_{uuid.uuid4()}.zst"
                 
                 md5 = hashlib.md5()
-                frame_size = 2 * 1024 * 1024  # 2MB frames
                 frame_index = []  # 帧索引表
                 compressor = zstd.ZstdCompressor(level=6)
                 
@@ -124,32 +123,52 @@ class DownloadManager:
                 
                 downloaded_bytes = len(raw_buffer)
                 
-                # 分块压缩并记录索引
+                # 换行对齐分块压缩
+                MIN_CHUNK_SIZE = 2 * 1024 * 1024  # 2MB minimum
+                MAX_CHUNK_SIZE = 4 * 1024 * 1024  # 4MB maximum
                 compressed_offset = 0
-                decompressed_offset = 0
+                offset = 0
                 
                 with temp_path.open("wb") as f_out:
-                    while decompressed_offset < downloaded_bytes:
-                        # 取出一块原始数据
-                        chunk_end = min(decompressed_offset + frame_size, downloaded_bytes)
-                        raw_chunk = bytes(raw_buffer[decompressed_offset:chunk_end])
-                        chunk_len = len(raw_chunk)
+                    while offset < downloaded_bytes:
+                        # 计算初始结束位置 (至少 2MB)
+                        end = min(offset + MIN_CHUNK_SIZE, downloaded_bytes)
+                        ends_with_newline = False
                         
-                        # 独立压缩这一块, 生成完整的 Zstd Frame
+                        # 如果不是文件末尾, 向后搜索换行符
+                        if end < downloaded_bytes:
+                            max_end = min(offset + MAX_CHUNK_SIZE, downloaded_bytes)
+                            
+                            # 从 end 向后搜索 \n (最多到 max_end)
+                            newline_pos = raw_buffer.find(b'\n', end, max_end)
+                            if newline_pos != -1:
+                                end = newline_pos + 1  # 包含换行符
+                                ends_with_newline = True
+                            else:
+                                end = max_end  # 未找到, 取到 max_end
+                        
+                        # 检查最后一个字符是否为换行
+                        if not ends_with_newline and end > 0 and raw_buffer[end - 1:end] == b'\n':
+                            ends_with_newline = True
+                        
+                        # 提取并压缩
+                        raw_chunk = bytes(raw_buffer[offset:end])
+                        chunk_len = len(raw_chunk)
                         compressed_chunk = compressor.compress(raw_chunk)
                         f_out.write(compressed_chunk)
                         
                         # 记录索引信息
                         compressed_len = len(compressed_chunk)
                         frame_index.append({
-                            "cs": compressed_offset,   # compressed_start
-                            "cl": compressed_len,      # compressed_length
-                            "ds": decompressed_offset, # decompressed_start
-                            "dl": chunk_len            # decompressed_length
+                            "cs": compressed_offset,
+                            "cl": compressed_len,
+                            "ds": offset,
+                            "dl": chunk_len,
+                            "nl": ends_with_newline  # 是否以换行结束
                         })
                         
                         compressed_offset += compressed_len
-                        decompressed_offset += chunk_len
+                        offset = end
                 
                 # 释放内存
                 del raw_buffer
@@ -168,9 +187,11 @@ class DownloadManager:
 
                 # 构建完整的帧索引
                 complete_frame_index = {
-                    "version": 1,
-                    "frameSize": frame_size,
-                    "originalSize": downloaded_bytes,  # 记录原始大小
+                    "version": 2,  # 版本号升级
+                    "frameSize": MIN_CHUNK_SIZE,
+                    "maxFrameSize": MAX_CHUNK_SIZE,
+                    "lineAligned": True,
+                    "originalSize": downloaded_bytes,
                     "compressedSize": compressed_size,
                     "frames": frame_index
                 }

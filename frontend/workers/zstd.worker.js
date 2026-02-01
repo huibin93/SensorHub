@@ -45,44 +45,71 @@ self.onmessage = async (e) => {
       result = { status: 'hash_done', hash };
 
     } else if (action === 'compress') {
-      // === 动作2：执行压缩 ===
-      // Load zstd.wasm from public folder
+      // === 动作2：执行压缩 (换行对齐分帧) ===
       if (!self.zstdInitialized) {
         await init('/zstd.wasm');
         self.zstdInitialized = true;
       }
 
       const compressedChunks = [];
-      const frameIndex = [];  // 帧索引表
-      let compressedOffset = 0;   // 压缩数据累计偏移
-      let decompressedOffset = 0; // 原始数据累计偏移
-      const chunkSize = 2 * 1024 * 1024; // 2MB chunks
-      const totalChunks = Math.ceil(file.size / chunkSize);
+      const frameIndex = [];
+      let compressedOffset = 0;
 
-      for (let i = 0; i < totalChunks; i++) {
+      const MIN_CHUNK_SIZE = 2 * 1024 * 1024; // 2MB minimum
+      const MAX_CHUNK_SIZE = 4 * 1024 * 1024; // 4MB maximum
+      const NEWLINE = 0x0A; // \n
+
+      // 读取整个文件到 buffer
+      const buffer = new Uint8Array(await file.arrayBuffer());
+      let offset = 0;
+      let frameIdx = 0;
+
+      while (offset < buffer.length) {
         try {
-          const start = i * chunkSize;
-          const end = Math.min(start + chunkSize, file.size);
-          const chunkBlob = file.slice(start, end);
-          const arrayBuffer = await chunkBlob.arrayBuffer();
-          const uint8Array = new Uint8Array(arrayBuffer);
+          // 计算初始结束位置 (至少 2MB)
+          let end = Math.min(offset + MIN_CHUNK_SIZE, buffer.length);
+          let endsWithNewline = false;
 
-          // Compress chunk (Creates a self-contained Zstd frame)
-          const compressedChunk = compress(uint8Array, level || 6);
+          // 如果不是文件末尾, 向后搜索换行符
+          if (end < buffer.length) {
+            const maxEnd = Math.min(offset + MAX_CHUNK_SIZE, buffer.length);
+
+            // 从 end 向后搜索 \n (最多到 maxEnd)
+            while (end < maxEnd && buffer[end] !== NEWLINE) {
+              end++;
+            }
+
+            if (end < buffer.length && buffer[end] === NEWLINE) {
+              end++; // 包含换行符
+              endsWithNewline = true;
+            }
+            // 如果在 maxEnd 内未找到换行, 就在 maxEnd 处切割
+          }
+
+          // 检查最后一个字符是否为换行
+          if (!endsWithNewline && end > 0 && buffer[end - 1] === NEWLINE) {
+            endsWithNewline = true;
+          }
+
+          // 提取并压缩
+          const chunk = buffer.slice(offset, end);
+          const compressedChunk = compress(chunk, level || 6);
           compressedChunks.push(compressedChunk);
 
-          // Record frame info for index
+          // 记录帧索引
           frameIndex.push({
-            cs: compressedOffset,       // compressed_start
-            cl: compressedChunk.length, // compressed_length
-            ds: decompressedOffset,     // decompressed_start
-            dl: uint8Array.length       // decompressed_length
+            cs: compressedOffset,
+            cl: compressedChunk.length,
+            ds: offset,
+            dl: chunk.length,
+            nl: endsWithNewline  // 是否以换行结束
           });
 
           compressedOffset += compressedChunk.length;
-          decompressedOffset += uint8Array.length;
+          offset = end;
+          frameIdx++;
         } catch (chunkErr) {
-          throw new Error(`Compression failed at chunk ${i}: ${chunkErr.message}`);
+          throw new Error(`Compression failed at frame ${frameIdx}: ${chunkErr.message}`);
         }
       }
 
@@ -91,10 +118,12 @@ self.onmessage = async (e) => {
         status: 'compress_done',
         blob,
         frameIndex: {
-          version: 1,
-          frameSize: chunkSize,
-          originalSize: file.size,      // 原始文件大小
-          compressedSize: blob.size,    // 压缩后大小
+          version: 2,  // 版本号升级
+          frameSize: MIN_CHUNK_SIZE,
+          maxFrameSize: MAX_CHUNK_SIZE,
+          lineAligned: true,
+          originalSize: file.size,
+          compressedSize: blob.size,
           frames: frameIndex
         }
       };

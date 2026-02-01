@@ -657,7 +657,7 @@ def trigger_parse(
     if not file:
         raise HTTPException(404, "File not found")
 
-    # 直接设置状态为已处理 (简化状态管理, 无 Processing 状态)
+    # 直接设置状态为已处理
     crud.update_file(session, file_id, {"status": "Processed"})
 
     return {"status": "Processed", "message": "Parse completed"}

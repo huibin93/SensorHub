@@ -45,3 +45,4 @@ venv/
 .python-version
 backend/storage
 test_data
+doc/PyScript

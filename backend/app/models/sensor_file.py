@@ -23,12 +23,13 @@ class PhysicalFile(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now, description="物理文件首次入库时间")
     compression_ratio: Optional[str] = Field(default=None, description="压缩率统计")
     
-    # 帧索引元数据 (用于随机读取)
-    # 格式: {"version": 1, "frameSize": 2097152, "frames": [{cs, cl, ds, dl}, ...]}
+    # 帧索引元数据 (用于随机读取和并行处理)
+    # 格式: {"version": 2, "frameSize": 2097152, "maxFrameSize": 4194304, "lineAligned": true, "frames": [{cs, cl, ds, dl, nl}, ...]}
     # cs: compressed_start (压缩数据起始偏移)
     # cl: compressed_length (压缩数据长度)
     # ds: decompressed_start (解压数据起始偏移)
     # dl: decompressed_length (解压数据长度)
+    # nl: ends_with_newline (是否以换行符结束, 用于并行处理)
     frame_index: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
     # 反向关系
