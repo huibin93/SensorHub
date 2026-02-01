@@ -66,6 +66,7 @@ const contentHeight = computed(() => totalLines.value * LINE_HEIGHT);
 
 // Methods
 const openInNewTab = () => {
+  console.log(`[ClickLog] FilePreviewDrawer | Action: OpenInNewTab | FileID: ${props.id}`);
   if (props.id) {
     const routeData = router.resolve({ name: 'FileContent', params: { id: props.id } });
     window.open(routeData.href, '_blank');
@@ -79,6 +80,7 @@ const handleScroll = (e: Event) => {
 
 // Search Logic (Same as FileContentView)
 const performSearch = () => {
+    console.log(`[ClickLog] FilePreviewDrawer | Action: Search | Query: ${searchQuery.value}`);
     searchMatches.value = [];
     currentMatchIndex.value = -1;
     if (!searchQuery.value) return;
@@ -93,12 +95,14 @@ const performSearch = () => {
 };
 
 const nextMatch = () => {
+    console.log(`[ClickLog] FilePreviewDrawer | Action: NextMatch | Index: ${currentMatchIndex.value + 1}`);
     if (searchMatches.value.length === 0) return;
     currentMatchIndex.value = (currentMatchIndex.value + 1) % searchMatches.value.length;
     scrollToLine(searchMatches.value[currentMatchIndex.value]);
 };
 
 const prevMatch = () => {
+    console.log(`[ClickLog] FilePreviewDrawer | Action: PrevMatch | Index: ${currentMatchIndex.value - 1}`);
     if (searchMatches.value.length === 0) return;
     currentMatchIndex.value = (currentMatchIndex.value - 1 + searchMatches.value.length) % searchMatches.value.length;
     scrollToLine(searchMatches.value[currentMatchIndex.value]);
@@ -134,10 +138,30 @@ const escapeHtml = (text: string) => {
     return div.innerHTML;
 };
 
-// Load Logic
+// Load Logic - 流式解压 + 渐进式渲染
+let abortController: AbortController | null = null;
+const currentFileId = ref<string | null>(null);
+
 const loadPreview = async () => {
   if (!props.id) return;
   
+  // Prevent duplicate load
+  if (props.id === currentFileId.value && !error.value && allLines.value.length > 0) {
+      console.log(`[ClickLog] FilePreviewDrawer | Action: LoadSkip | FileID: ${props.id} | Reason: Already loaded`);
+      return;
+  }
+
+  // Cancel previous request
+  if (abortController) {
+      abortController.abort();
+      abortController = null;
+  }
+  abortController = new AbortController();
+  const signal = abortController.signal;
+  
+  console.log(`[ClickLog] FilePreviewDrawer | Action: LoadPreview | FileID: ${props.id}`);
+  
+  currentFileId.value = props.id;
   isLoading.value = true;
   error.value = '';
   allLines.value = [];
@@ -146,117 +170,155 @@ const loadPreview = async () => {
   
   const startTime = performance.now();
 
-    try {
-    // Try cache first (full load if cached)
+  try {
+    // Try cache first
     let cached = null;
     try {
-        cached = await fileCacheService.get(props.id);
+      cached = await fileCacheService.get(props.id);
     } catch (e) { /* ignore */ }
 
-    let compressedData: Blob;
+    if (signal.aborted) return;
+
     let accumulatedText = '';
+    const RENDER_BATCH_SIZE = 5000; // 每 5000 行渲染一批
     
-    // Decompressor setup (shared for both cached and network)
+    // 解压回调：只累积文本，不做渲染
     const decompressor = new Decompress((chunk) => {
-        const text = new TextDecoder('utf-8', { fatal: false }).decode(chunk); 
-        accumulatedText += text;
+      const text = new TextDecoder('utf-8', { fatal: false }).decode(chunk);
+      accumulatedText += text;
     });
+    
+    // 辅助函数：刷新累积的行到 UI
+    const flushLines = () => {
+      if (signal.aborted) return;
+      const newlineCount = (accumulatedText.match(/\n/g) || []).length;
+      if (newlineCount >= RENDER_BATCH_SIZE) {
+        const lines = accumulatedText.split('\n');
+        const completedLines = lines.slice(0, -1);
+        accumulatedText = lines[lines.length - 1] || '';
+        
+        allLines.value.push(...completedLines);
+        loadedLines.value = allLines.value.length;
+        console.log(`[Drawer] Rendered ${allLines.value.length} lines...`);
+      }
+    };
 
     if (cached) {
-        loadedFromCache.value = true;
-        filename.value = cached.filename;
-        originalSize.value = cached.originalSize;
-        compressedSize.value = cached.compressedSize;
+      console.log('[Drawer] Loading from cache...');
+      loadedFromCache.value = true;
+      filename.value = cached.filename;
+      originalSize.value = cached.originalSize;
+      compressedSize.value = cached.compressedSize;
+      
+      // 流式解压缓存数据
+      const arrayBuffer = await cached.data.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      const CHUNK_SIZE = 256 * 1024; // 256KB 分块
+      
+      for (let i = 0; i < uint8Array.length; i += CHUNK_SIZE) {
+        if (signal.aborted) return;
+        const chunk = uint8Array.slice(i, Math.min(i + CHUNK_SIZE, uint8Array.length));
+        const isLast = i + CHUNK_SIZE >= uint8Array.length;
+        decompressor.push(chunk, isLast);
         
-        // Decompress cached data
-        const arrayBuffer = await cached.data.arrayBuffer();
-        try {
-            decompressor.push(new Uint8Array(arrayBuffer), true);
-        } catch (e) {
-            console.warn('[Drawer] Error decompressing cached data:', e);
-        }
-        
+        flushLines();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      
     } else {
-        loadedFromCache.value = false;
-        
-        const transferStart = performance.now();
-        const response = await fetch(`/api/v1/files/${props.id}/content`);
-        if (!response.ok) throw new Error(`Failed to load: ${response.statusText}`);
+      console.log('[Drawer] Fetching from network with streaming decompression...');
+      loadedFromCache.value = false;
+      
+      const transferStart = performance.now();
+      const response = await fetch(`/api/v1/files/${props.id}/content`, { signal });
+      if (!response.ok) throw new Error(`Failed to load: ${response.statusText}`);
 
-        filename.value = response.headers.get('X-File-Name') || 'Unknown';
-        originalSize.value = parseInt(response.headers.get('X-Original-Size') || '0');
-        compressedSize.value = parseInt(response.headers.get('X-Compressed-Size') || '0');
+      filename.value = response.headers.get('X-File-Name') || 'Unknown';
+      originalSize.value = parseInt(response.headers.get('X-Original-Size') || '0');
+      compressedSize.value = parseInt(response.headers.get('X-Compressed-Size') || '0');
 
-        if (!response.body) throw new Error('Response body is null');
+      if (!response.body) throw new Error('Response body is null');
 
-        const reader = response.body.getReader();
-        const chunks: Uint8Array[] = [];
-        let receivedLength = 0;
-        
-        // Read controlled amount of chunks
-        const MAX_CHUNKS = appConfig.preview.maxChunks || 20; 
-
-        try {
-            for (let i = 0; i < MAX_CHUNKS; i++) {
-                const { done, value } = await reader.read();
-                if (done) {
-                    console.log('[Drawer] Stream complete early');
-                    break;
-                }
-                
-                chunks.push(value);
-                receivedLength += value.length;
-
-                // Decompress this chunk immediately
-                try {
-                    decompressor.push(value);
-                } catch (e) {
-                    console.warn(`[Drawer] Chunk ${i + 1} decompression warning:`, e);
-                }
-            }
-            // Cancel the rest of the stream
-            reader.cancel();
-            isPartialLoad.value = true;
-        } catch (e) {
-            console.warn('[Drawer] Stream interrupted or error:', e);
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = []; 
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (!signal.aborted) decompressor.push(new Uint8Array(0), true);
+          break;
         }
-
-        const transferEnd = performance.now();
-        transferTime.value = transferEnd - transferStart;
+        if (signal.aborted) break;
         
-        compressedData = new Blob(chunks as BlobPart[], { type: 'application/zstd' });
+        chunks.push(value);
+        
+        try {
+          decompressor.push(value);
+        } catch (e) {
+          console.warn('[Drawer] Decompression warning:', e);
+        }
+        
+        flushLines();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
+      const transferEnd = performance.now();
+      transferTime.value = transferEnd - transferStart;
+      
+      // Only cache if fully loaded and not aborted
+      if (!signal.aborted) {
+          const compressedData = new Blob(chunks as BlobPart[], { type: 'application/zstd' });
+          try {
+            await fileCacheService.set({
+              fileId: props.id,
+              filename: filename.value,
+              data: compressedData,
+              originalSize: originalSize.value,
+              compressedSize: compressedSize.value,
+              cachedAt: Date.now()
+            });
+            console.log('[Drawer] Saved to cache');
+          } catch (e) {
+            console.warn('[Drawer] Failed to save to cache:', e);
+          }
+      }
     }
 
-    // Processing lines
-    const lines = accumulatedText.split('\n');
-    
-    // If partial load, always remove the last line as it might be incomplete/cut-off
-    if (isPartialLoad.value && lines.length > 0) {
-        lines.pop();
+    if (signal.aborted) return;
+
+    // 处理剩余未渲染的行
+    if (accumulatedText) {
+      const remainingLines = accumulatedText.split('\n');
+      allLines.value.push(...remainingLines);
+      loadedLines.value = allLines.value.length;
     }
     
-    allLines.value = lines;
-    loadedLines.value = lines.length;
+    decompressTime.value = performance.now() - startTime - transferTime.value;
     
-    // Decompress time is now spread across chunks, but we can roughly say:
-    decompressTime.value = performance.now() - transferTime.value -  startTime; // rough estimate or we can track it better
+    const totalTime = performance.now() - startTime;
+    console.log(`[Drawer] Loaded ${allLines.value.length} lines in ${Math.round(totalTime)}ms`);
 
   } catch (err: any) {
+    if (err.name === 'AbortError') {
+        console.log('[Drawer] Load aborted');
+        return;
+    }
     error.value = err.message || 'Failed to load preview';
     console.error('[Drawer] Error:', err);
   } finally {
-    isLoading.value = false;
+    if (!signal.aborted) {
+         isLoading.value = false;
+         abortController = null;
+    }
   }
 };
 
-watch(() => props.isOpen, (newVal) => {
-  if (newVal && props.id) {
+// Initial Load & Watch
+watch([() => props.isOpen, () => props.id], ([newOpen, newId]) => {
+  if (newOpen && newId) {
     loadPreview();
-  } else {
-    // Reset state on close
-    allLines.value = [];
-    filename.value = '';
   }
+  // No else/reset here to keep state for fast re-open (cache behavior)
 });
 </script>
 
@@ -322,14 +384,20 @@ watch(() => props.isOpen, (newVal) => {
 
         <!-- Content -->
         <div class="flex-1 overflow-hidden relative bg-slate-50 flex flex-col">
-            <!-- Loading -->
-            <div v-if="isLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-10">
+            <!-- Loading Overlay (Initial only) -->
+            <div v-if="isLoading && loadedLines === 0" class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-20">
                 <Loader2 :size="32" class="animate-spin text-blue-600 mb-2" />
                 <p class="text-slate-500">Loading preview...</p>
             </div>
+            
+            <!-- Loading Indicator (Progressive) -->
+            <div v-if="isLoading && loadedLines > 0" class="absolute top-2 right-4 bg-white/90 backdrop-blur px-3 py-1.5 rounded-full shadow-sm border border-slate-200 z-20 flex items-center gap-2 text-xs text-blue-600">
+                <Loader2 :size="12" class="animate-spin" />
+                <span>Loading... ({{ loadedLines.toLocaleString() }} lines)</span>
+            </div>
 
             <!-- Error -->
-            <div v-else-if="error" class="flex-1 flex items-center justify-center p-8 text-center">
+            <div v-if="error" class="flex-1 flex items-center justify-center p-8 text-center">
                 <div class="text-red-500">
                     <AlertTriangle :size="32" class="mx-auto mb-2" />
                     <p>{{ error }}</p>
@@ -338,10 +406,10 @@ watch(() => props.isOpen, (newVal) => {
 
             <!-- Virtual Scroll -->
             <div 
-                v-else 
+                v-else
                 ref="containerRef"
                 @scroll="handleScroll"
-                class="flex-1 overflow-auto bg-white mx-4 my-2 rounded-lg border border-slate-200 shadow-sm"
+                class="flex-1 overflow-y-auto relative font-mono text-sm"
             >
                 <div class="relative" :style="{ height: contentHeight + 'px' }">
                     <div

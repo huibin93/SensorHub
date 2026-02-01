@@ -80,6 +80,7 @@ watch([searchQuery, filterDevice, filterStatus, pageSize], () => {
 });
 
 const handlePageChange = (page: number) => {
+    console.log(`[ClickLog] DataTable | Action: PageChange | Page: ${page}`);
     if (page >= 1 && page <= totalPages.value) {
         currentPage.value = page;
     }
@@ -102,6 +103,7 @@ onUnmounted(() => {
 // ===== SELECTION HANDLERS =====
 const handleSelectAll = (e: Event) => {
   const checked = (e.target as HTMLInputElement).checked;
+  console.log(`[ClickLog] DataTable | Action: SelectAll | Checked: ${checked}`);
   const newSelected = new Set(selectedIds.value);
   
   if (checked) {
@@ -115,6 +117,7 @@ const handleSelectAll = (e: Event) => {
 };
 
 const handleSelectRow = (id: string) => {
+  console.log(`[ClickLog] DataTable | Action: SelectRow | FileID: ${id}`);
   const newSelected = new Set(selectedIds.value);
   if (newSelected.has(id)) {
     newSelected.delete(id);
@@ -138,18 +141,21 @@ const updateDevice = (id: string, deviceType: DeviceType, deviceModel: string) =
 };
 
 const triggerParse = (ids: string[]) => {
+    console.log(`[ClickLog] DataTable | Action: TriggerParse | FileIDs: ${ids.join(', ')}`);
     fileStore.triggerParse(ids);
     if (ids.length > 1) selectedIds.value = new Set();
 };
 
 // ===== BATCH ACTIONS =====
 const handleBatchDownload = () => {
+    console.log(`[ClickLog] DataTable | Action: BatchDownload | Count: ${selectedIds.value.size}`);
     if (selectedIds.value.size === 0) return;
     fileStore.batchDownload(Array.from(selectedIds.value));
     selectedIds.value = new Set();
 };
 
 const handleBatchEdit = () => {
+    console.log(`[ClickLog] DataTable | Action: BatchEdit | Count: ${selectedIds.value.size}`);
     if (selectedIds.value.size === 0) return;
     showBatchEditModal.value = true;
 };
@@ -163,6 +169,7 @@ const onBatchEditConfirm = async (updates: any) => {
 
 const handleBatchDelete = () => {
     const count = selectedIds.value.size;
+    console.log(`[ClickLog] DataTable | Action: BatchDelete | Count: ${count}`);
     if (count === 0) return;
     
     if (!window.confirm(`Are you sure you want to delete ${count} selected file(s)?`)) return;
@@ -173,6 +180,7 @@ const handleBatchDelete = () => {
 };
 
 const deleteRow = (id: string) => {
+    console.log(`[ClickLog] DataTable | Action: DeleteRow | FileID: ${id}`);
     if (!window.confirm('Are you sure you want to delete this file?')) {
         activeRowMenu.value = null;
         return;
@@ -182,6 +190,7 @@ const deleteRow = (id: string) => {
 };
 
 const downloadRow = (id: string) => {
+    console.log(`[ClickLog] DataTable | Action: DownloadRow | FileID: ${id}`);
     const file = files.value.find(f => f.id === id);
     if (file) {
         let name = file.filename;
@@ -209,6 +218,7 @@ const handleClickOutside = (event: MouseEvent) => {
 
 // ===== RIGHT CLICK MENU =====
 const handleRightClick = (event: MouseEvent, rowId: string) => {
+    console.log(`[ClickLog] DataTable | Action: RightClick | FileID: ${rowId}`);
     event.preventDefault();
     contextMenuPosition.value = { x: event.clientX, y: event.clientY };
     contextMenuRow.value = rowId;
@@ -220,6 +230,7 @@ const previewFileId = ref<string | null>(null);
 
 // ===== ACTIONS =====
 const viewFile = (id: string, event?: Event) => {
+    console.log(`[ClickLog] DataTable | Action: ViewFile | FileID: ${id}`);
     // If Ctrl/Cmd click, open in new tab directly
     if (event && (event.ctrlKey || event.metaKey)) {
         openInNewTab(id);
@@ -232,6 +243,7 @@ const viewFile = (id: string, event?: Event) => {
 };
 
 const openInNewTab = (id: string) => {
+    console.log(`[ClickLog] DataTable | Action: OpenInNewTab | FileID: ${id}`);
     const routeData = router.resolve({ name: 'FileContent', params: { id } });
     window.open(routeData.href, '_blank');
 };
