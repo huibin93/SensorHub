@@ -22,6 +22,14 @@ class PhysicalFile(SQLModel, table=True):
     
     created_at: datetime = Field(default_factory=datetime.now, description="物理文件首次入库时间")
     compression_ratio: Optional[str] = Field(default=None, description="压缩率统计")
+    
+    # 帧索引元数据 (用于随机读取)
+    # 格式: {"version": 1, "frameSize": 2097152, "frames": [{cs, cl, ds, dl}, ...]}
+    # cs: compressed_start (压缩数据起始偏移)
+    # cl: compressed_length (压缩数据长度)
+    # ds: decompressed_start (解压数据起始偏移)
+    # dl: decompressed_length (解压数据长度)
+    frame_index: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
     # 反向关系
     sensor_files: List["SensorFile"] = Relationship(back_populates="physical_file")

@@ -313,7 +313,7 @@ const processAndUploadWithTask = async (file: File, taskId: string) => {
         uploadQueueRef.value?.updateProgress(taskId, 55);
         
         const compressStart = performance.now();
-        const { blob: compressedBlob } = await callWorker('compress', { file, level: 6 });
+        const { blob: compressedBlob, frameIndex } = await callWorker('compress', { file, level: 6 });
         const compressEnd = performance.now();
         const duration = (compressEnd - compressStart).toFixed(0);
         const ratio = ((compressedBlob.size / file.size) * 100).toFixed(1);
@@ -323,7 +323,8 @@ const processAndUploadWithTask = async (file: File, taskId: string) => {
             `  Time: ${duration}ms\n` + 
             `  Raw: ${file.size} bytes\n` + 
             `  Compressed: ${compressedBlob.size} bytes\n` + 
-            `  Ratio: ${ratio}%`
+            `  Ratio: ${ratio}%\n` +
+            `  Frames: ${frameIndex?.frames?.length || 0}`
         );
         uploadQueueRef.value?.updateProgress(taskId, 70);
 
@@ -335,6 +336,9 @@ const processAndUploadWithTask = async (file: File, taskId: string) => {
         formData.append('md5', hash as string);
         formData.append('filename', filename);
         formData.append('original_size', String(file.size));
+        if (frameIndex) {
+            formData.append('frame_index', JSON.stringify(frameIndex));
+        }
         
         const response = await fetch(`${API_BASE_URL}/files/upload`, {
             method: 'POST',

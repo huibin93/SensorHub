@@ -165,12 +165,29 @@ async def upload_file(
     filename: str = Form(..., description="Original filename"),
     original_size: int = Form(...),
     deviceType: Optional[str] = Form("Unknown"),
+    frame_index: Optional[str] = Form(None, description="Frame index JSON for seekable access"),
     session: Session = Depends(deps.get_db)
 ) -> Any:
     """
     流式上传 Zstd 压缩文件 (接口 v2);
     前端已完成压缩和 MD5 计算。后端直接落盘并异步校验。
+    
+    Args:
+        frame_index: 帧索引 JSON 字符串, 格式: {"version": 1, "frameSize": 2097152, "frames": [{cs, cl, ds, dl}, ...]}
     """
+    # 解析并验证 frame_index
+    parsed_frame_index = None
+    if frame_index:
+        try:
+            parsed_frame_index = json.loads(frame_index)
+            # 验证: 所有帧的 dl 之和应等于 original_size
+            total_dl = sum(f["dl"] for f in parsed_frame_index.get("frames", []))
+            if total_dl != original_size:
+                logger.warning(f"Frame index dl mismatch: {total_dl} vs {original_size}")
+                # 不阻断上传, 仅记录警告
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid frame_index JSON: {e}")
+            parsed_frame_index = None
     # 1. 检查物理文件是否存在 (秒传核心逻辑)
     existing_phy = crud.get_physical_file(session, md5)
     expected_raw_path = StorageService.get_raw_path(md5)
@@ -273,8 +290,18 @@ async def upload_file(
         # 4.1 PhysicalFile
         phy_file = crud.get_physical_file(session, md5)
         if not phy_file:
-            phy_file = PhysicalFile(hash=md5, size=save_res["file_size"], path=saved_path)
+            phy_file = PhysicalFile(
+                hash=md5, 
+                size=save_res["file_size"], 
+                path=saved_path,
+                frame_index=parsed_frame_index  # 存储帧索引
+            )
             crud.create_physical_file(session, phy_file)
+        elif parsed_frame_index and not phy_file.frame_index:
+            # 更新已有 PhysicalFile 的 frame_index (如果之前没有)
+            phy_file.frame_index = parsed_frame_index
+            session.add(phy_file)
+            session.commit()
             
         # 4.2 SensorFile
         # 计算文件名后缀
@@ -700,3 +727,52 @@ async def get_file_content_stream(
             "Content-Disposition": f'inline; filename="{file.filename}.zst"'
         }
     )
+
+
+# --- Reserved APIs for Frame-based Access ---
+
+@router.get("/files/{file_id}/frames")
+def get_file_frames(
+    file_id: str,
+    session: Session = Depends(deps.get_db)
+) -> dict:
+    """
+    获取文件的帧索引信息 (预留接口);
+    
+    Args:
+        file_id: 文件 ID;
+        
+    Returns:
+        dict: 帧索引信息, 格式: {"version": 1, "frameSize": 2097152, "frames": [...]}
+    """
+    file = crud.get_file(session, file_id)
+    if not file:
+        raise HTTPException(404, "File not found")
+    
+    phy_file = crud.get_physical_file(session, file.file_hash)
+    if not phy_file or not phy_file.frame_index:
+        return {"message": "Frame index not available", "frames": []}
+    
+    return phy_file.frame_index
+
+
+@router.get("/files/{file_id}/frame/{frame_idx}")
+def get_single_frame(
+    file_id: str,
+    frame_idx: int,
+    session: Session = Depends(deps.get_db)
+) -> dict:
+    """
+    获取单个帧的解压数据 (预留接口, 暂未实现);
+    
+    Args:
+        file_id: 文件 ID;
+        frame_idx: 帧索引 (0-based);
+        
+    Returns:
+        dict: 帧数据;
+        
+    Raises:
+        HTTPException: 501 Not Implemented;
+    """
+    raise HTTPException(501, "Not implemented yet - reserved for future use")

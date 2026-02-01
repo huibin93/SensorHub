@@ -100,28 +100,59 @@ class DownloadManager:
                 temp_path = temp_dir / f"temp_{uuid.uuid4()}.zst"
                 
                 md5 = hashlib.md5()
-                dctx = zstd.ZstdCompressor(level=3)
+                frame_size = 2 * 1024 * 1024  # 2MB frames
+                frame_index = []  # 帧索引表
+                compressor = zstd.ZstdCompressor(level=6)
                 
-                # 压缩并保存
-                with temp_path.open("wb") as f_out:
-                    with dctx.stream_writer(f_out) as compressor:
-                        downloaded_bytes = 0
-                        for chunk in resp.iter_content(chunk_size=8192):
-                            # 取消检查点
-                            if self.cancel_event.is_set():
-                                self.task_states[filename] = 'cancelled'
-                                return 
+                # 先下载到内存缓冲区, 然后分块压缩
+                # (对于大文件, 可以改为边下载边写入临时原始文件)
+                raw_buffer = bytearray()
+                
+                for chunk in resp.iter_content(chunk_size=8192):
+                    # 取消检查点
+                    if self.cancel_event.is_set():
+                        self.task_states[filename] = 'cancelled'
+                        return 
 
-                            if chunk:
-                                downloaded_bytes += len(chunk)
-                                md5.update(chunk)
-                                compressor.write(chunk)
-                                
+                    if chunk:
+                        raw_buffer.extend(chunk)
+                        md5.update(chunk)
+                
                 if self.cancel_event.is_set():
-                    if temp_path.exists():
-                        temp_path.unlink()
                     self.task_states[filename] = 'cancelled'
                     return
+                
+                downloaded_bytes = len(raw_buffer)
+                
+                # 分块压缩并记录索引
+                compressed_offset = 0
+                decompressed_offset = 0
+                
+                with temp_path.open("wb") as f_out:
+                    while decompressed_offset < downloaded_bytes:
+                        # 取出一块原始数据
+                        chunk_end = min(decompressed_offset + frame_size, downloaded_bytes)
+                        raw_chunk = bytes(raw_buffer[decompressed_offset:chunk_end])
+                        chunk_len = len(raw_chunk)
+                        
+                        # 独立压缩这一块, 生成完整的 Zstd Frame
+                        compressed_chunk = compressor.compress(raw_chunk)
+                        f_out.write(compressed_chunk)
+                        
+                        # 记录索引信息
+                        compressed_len = len(compressed_chunk)
+                        frame_index.append({
+                            "cs": compressed_offset,   # compressed_start
+                            "cl": compressed_len,      # compressed_length
+                            "ds": decompressed_offset, # decompressed_start
+                            "dl": chunk_len            # decompressed_length
+                        })
+                        
+                        compressed_offset += compressed_len
+                        decompressed_offset += chunk_len
+                
+                # 释放内存
+                del raw_buffer
 
                 file_hash = md5.hexdigest()
                 final_path = StorageService.get_raw_path(file_hash)
@@ -135,11 +166,28 @@ class DownloadManager:
                     temp_path.rename(final_path)
                     logger.info(f"Saved {filename} to {final_path}")
 
-                # 数据库注册
+                # 构建完整的帧索引
+                complete_frame_index = {
+                    "version": 1,
+                    "frameSize": frame_size,
+                    "originalSize": downloaded_bytes,  # 记录原始大小
+                    "compressedSize": compressed_size,
+                    "frames": frame_index
+                }
+
                 phy_file = crud.get_physical_file(session, file_hash)
                 if not phy_file:
-                    phy_file = PhysicalFile(hash=file_hash, size=compressed_size, path=str(final_path))
+                    phy_file = PhysicalFile(
+                        hash=file_hash, 
+                        size=compressed_size, 
+                        path=str(final_path),
+                        frame_index=complete_frame_index
+                    )
                     crud.create_physical_file(session, phy_file)
+                elif not phy_file.frame_index:
+                    phy_file.frame_index = complete_frame_index
+                    session.add(phy_file)
+                    session.commit()
                     
                 exact_match = crud.get_exact_match_file(session, file_hash, filename)
                 if exact_match:

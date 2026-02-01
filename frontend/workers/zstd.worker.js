@@ -53,7 +53,10 @@ self.onmessage = async (e) => {
       }
 
       const compressedChunks = [];
-      const chunkSize = 2 * 1024 * 1024; // Reduce to 2MB chunks to avoid OOM
+      const frameIndex = [];  // 帧索引表
+      let compressedOffset = 0;   // 压缩数据累计偏移
+      let decompressedOffset = 0; // 原始数据累计偏移
+      const chunkSize = 2 * 1024 * 1024; // 2MB chunks
       const totalChunks = Math.ceil(file.size / chunkSize);
 
       for (let i = 0; i < totalChunks; i++) {
@@ -65,15 +68,36 @@ self.onmessage = async (e) => {
           const uint8Array = new Uint8Array(arrayBuffer);
 
           // Compress chunk (Creates a self-contained Zstd frame)
-          const compressedChunk = compress(uint8Array, level || 3);
+          const compressedChunk = compress(uint8Array, level || 6);
           compressedChunks.push(compressedChunk);
+
+          // Record frame info for index
+          frameIndex.push({
+            cs: compressedOffset,       // compressed_start
+            cl: compressedChunk.length, // compressed_length
+            ds: decompressedOffset,     // decompressed_start
+            dl: uint8Array.length       // decompressed_length
+          });
+
+          compressedOffset += compressedChunk.length;
+          decompressedOffset += uint8Array.length;
         } catch (chunkErr) {
           throw new Error(`Compression failed at chunk ${i}: ${chunkErr.message}`);
         }
       }
 
       const blob = new Blob(compressedChunks, { type: 'application/zstd' });
-      result = { status: 'compress_done', blob };
+      result = {
+        status: 'compress_done',
+        blob,
+        frameIndex: {
+          version: 1,
+          frameSize: chunkSize,
+          originalSize: file.size,      // 原始文件大小
+          compressedSize: blob.size,    // 压缩后大小
+          frames: frameIndex
+        }
+      };
 
     } else if (action === 'decompress') {
       // === 动作3：执行解压 ===
