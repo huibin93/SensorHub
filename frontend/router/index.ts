@@ -44,12 +44,23 @@ const router = createRouter({
                     name: 'SerialTool',
                     component: SerialToolPage,
                 },
+                {
+                    path: 'log-analysis',
+                    name: 'LogAnalysis',
+                    component: () => import('../pages/LogAnalysisPage.vue'),
+                },
             ],
         },
         {
             path: '/files/:id/view',
             name: 'FileContent',
             component: FileContentView,
+            props: true,
+        },
+        {
+            path: '/logs/:id/view',
+            name: 'LogContent',
+            component: () => import('../pages/LogContentView.vue'),
             props: true,
         },
     ],

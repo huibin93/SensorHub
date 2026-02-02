@@ -111,21 +111,31 @@ const handleDrop = async (e: DragEvent) => {
     const items = Array.from(e.dataTransfer.items);
     console.log(`[Drag Drop] Found ${items.length} item(s)`);
     
+    // 关键修复：必须同步获取所有 entries，因为 DataTransferItemList 会在异步操作后被清空
+    const entries: { entry: FileSystemEntry | null; file: File | null }[] = [];
     for (const item of items) {
       if (item.kind === 'file') {
         const entry = item.webkitGetAsEntry?.();
-        if (entry) {
-          console.log(`[Drag Drop] Processing: ${entry.name} (${entry.isDirectory ? 'folder' : 'file'})`);
-          // 使用 FileSystemEntry API 递归遍历
-          const traversedFiles = await traverseFileTree(entry);
-          files.push(...traversedFiles);
-        } else {
-          // 降级：直接获取文件
-          const file = item.getAsFile();
-          if (file) {
-            console.log(`[Drag Drop] Direct file: ${file.name}`);
-            files.push(file);
-          }
+        const file = item.getAsFile();
+        entries.push({ entry, file });
+      }
+    }
+    
+    console.log(`[Drag Drop] Collected ${entries.length} entries synchronously`);
+    
+    // 现在可以安全地异步处理每个 entry
+    for (const { entry, file } of entries) {
+      if (entry) {
+        console.log(`[Drag Drop] Processing: ${entry.name} (${entry.isDirectory ? 'folder' : 'file'})`);
+        // 使用 FileSystemEntry API 递归遍历
+        const traversedFiles = await traverseFileTree(entry);
+        files.push(...traversedFiles);
+      } else if (file) {
+        // 降级：直接使用文件
+        console.log(`[Drag Drop] Direct file: ${file.name}`);
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        if (ext === 'rawdata' || ext === 'zip') {
+          files.push(file);
         }
       }
     }
@@ -201,7 +211,7 @@ onUnmounted(() => {
       class="fixed inset-0 z-50 flex items-center justify-center bg-blue-50/60 backdrop-blur-sm"
     >
       <!-- Dashed Border Box -->
-      <div class="w-[80%] h-[80%] border-4 border-dashed border-blue-400 rounded-3xl flex flex-col items-center justify-center bg-white/40 shadow-2xl pointer-events-none">
+      <div class="w-[70%] h-[70%] border-4 border-dashed border-blue-400 rounded-3xl flex flex-col items-center justify-center bg-white/40 shadow-2xl pointer-events-none">
           <div class="p-6 bg-blue-500 text-white rounded-full mb-6 shadow-lg shadow-blue-500/30 animate-bounce">
               <UploadCloud :size="48" />
           </div>

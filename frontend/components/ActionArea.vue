@@ -19,7 +19,7 @@ const uploadQueueRef = ref<InstanceType<typeof UploadQueueOverlay>>();
 // Upload state
 const isDragging = ref(false);
 const fileInputRef = ref(null) as any;
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 // Toast State
 const toasts = ref<{id: number, msg: string, type: 'error' | 'success'}[]>([]);

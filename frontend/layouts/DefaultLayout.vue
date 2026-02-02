@@ -18,6 +18,7 @@ const activeTab = computed(() => {
     'Reports': 'reports',
     'Settings': 'settings',
     'SerialTool': 'serial',
+    'LogAnalysis': 'logs',
   };
   return tabMap[routeName] || 'data';
 });

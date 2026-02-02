@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { LayoutDashboard, Activity, FileText, Settings, Database, ChevronLeft, ChevronRight, Network } from 'lucide-vue-next';
+import { LayoutDashboard, Activity, FileText, Settings, Database, ChevronLeft, ChevronRight, Network, FileSearch } from 'lucide-vue-next';
 
 const isCollapsed = ref(true);
 
@@ -19,6 +19,7 @@ const emit = defineEmits<{
 const menuItems = [
   { label: 'Data Management', icon: Database, id: 'data' },
   { label: 'Device Import', icon: Network, id: 'device' },
+  { label: 'Log Analysis', icon: FileSearch, id: 'logs' },
   { label: 'Algorithm Analysis', icon: Activity, id: 'algo' },
   { label: 'Report Center', icon: FileText, id: 'report' },
   { label: 'Serial Tool', icon: LayoutDashboard, id: 'serial' },
@@ -28,7 +29,7 @@ const menuItems = [
 
 <template>
   <aside 
-    class="bg-[#E9EEF6] flex flex-col h-full text-slate-500 border-r border-slate-200 flex-shrink-0 transition-all duration-300 relative"
+    class="bg-[#E9EEF6] flex flex-col h-full text-slate-500 border-r border-slate-200 flex-shrink-0 transition-all duration-300 relative z-50"
     :class="isCollapsed ? 'w-20' : 'w-64'"
   >
     <!-- Logo Area -->

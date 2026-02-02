@@ -335,7 +335,7 @@ watch([() => props.isOpen, () => props.id], ([newOpen, newId]) => {
     
     <!-- Drawer -->
     <Transition name="slide-right">
-      <div v-if="isOpen" class="fixed right-0 top-0 h-full w-[800px] max-w-[90vw] bg-white shadow-2xl z-50 flex flex-col transform transition-transform duration-300 ease-out">
+      <div v-if="isOpen" class="fixed right-0 top-0 h-full w-[60vw] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col">
         
         <!-- Header -->
         <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between gap-4 shrink-0">

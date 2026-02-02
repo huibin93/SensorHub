@@ -14,6 +14,8 @@ const writer = ref<WritableStreamDefaultWriter<Uint8Array> | null>(null);
 const serialWorker = ref<Worker | null>(null);
 const status = ref<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
 const errorMessage = ref('');
+const isSecureContext = ref(window.isSecureContext);
+const locationOrigin = window.location ? window.location.origin : '';
 const isSupported = ref(checkSupport());
 
 // 初始化 Worker
@@ -511,15 +513,28 @@ const stats = computed(() => {
 <template>
   <div class="flex flex-col h-full bg-slate-50">
     <!-- 不支持浏览器提示 -->
-    <div v-if="!isSupported" class="flex-1 flex items-center justify-center">
-      <div class="text-center p-8 bg-white rounded-xl shadow-sm border border-slate-200 max-w-md">
+    <div v-if="!isSupported" class="flex-1 flex items-center justify-center p-6">
+      <div class="text-center p-8 bg-white rounded-xl shadow-sm border border-slate-200 max-w-lg">
         <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-red-50 flex items-center justify-center">
           <AlertCircle :size="32" class="text-red-500" />
         </div>
-        <h2 class="text-xl font-bold text-slate-800 mb-2">Browser Not Supported</h2>
-        <p class="text-slate-500 text-sm">
-          Web Serial API is not available. Please use <span class="font-semibold text-blue-600">Chrome</span> or 
-          <span class="font-semibold text-blue-600">Edge</span>.
+        <h2 class="text-xl font-bold text-slate-800 mb-2">Web Serial Not Available</h2>
+        
+        <div v-if="!isSecureContext" class="text-left mt-4 text-sm text-slate-600 bg-slate-50 p-4 rounded-lg border border-slate-100">
+           <p class="font-bold text-red-600 mb-2">⚠️ Insecure Context Detected</p>
+           <p class="mb-2">Web Serial API requires a Secure Context (HTTPS or localhost). You are connecting via HTTP.</p>
+           <p class="mb-2 font-medium">To enable this for development:</p>
+           <ol class="list-decimal list-inside space-y-1 text-xs font-mono bg-white p-3 rounded border border-slate-200">
+             <li>Go to <span class="bg-yellow-100 px-1 text-slate-800 rounded select-all">chrome://flags/#unsafely-treat-insecure-origin-as-secure</span></li>
+             <li>Enable the flag</li>
+             <li>Add this URL to the text box: <br><span class="text-blue-600 select-all">{{ locationOrigin }}</span></li>
+             <li>Relaunch Chrome</li>
+           </ol>
+        </div>
+
+        <p v-else class="text-slate-500 text-sm mt-4">
+          Please use <span class="font-semibold text-blue-600">Chrome</span> or 
+          <span class="font-semibold text-blue-600">Edge</span> (Version 89+).
         </p>
       </div>
     </div>

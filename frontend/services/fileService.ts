@@ -14,7 +14,7 @@ import { ZipWriter } from '@zip.js/zip.js';
 
 // ===== CONFIGURATION (from .env) =====
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 // ===== TYPE DEFINITIONS =====
 export interface FileUpdatePayload {

@@ -31,6 +31,7 @@ const handleNavigate = (id: string) => {
     'reports': 'Reports',
     'settings': 'Settings',
     'serial': 'SerialTool',
+    'logs': 'LogAnalysis',
   };
   
   const routeName = routeMap[id];
