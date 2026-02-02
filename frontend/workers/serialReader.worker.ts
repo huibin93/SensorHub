@@ -68,6 +68,12 @@ async function readLoop(stream: ReadableStream<Uint8Array>) {
                         const chunk = decoder.decode(value, { stream: true });
                         buffer += chunk;
 
+                        // 修复丢失回车的问题: 如果时间戳前面不是换行符，强制添加换行
+                        // 注意：这里是对整个 buffer 做替换，可能会稍微影响性能，但在文本量不大时可以接受
+                        // 为了避免切断尚未接收完整的时间戳，我们只处理 buffer 中间的部分，或者依赖正则的健壮性
+                        // 正则: 非换行符 + 时间戳 -> 非换行符 + \n + 时间戳
+                        buffer = buffer.replace(/([^\n])(\[\d{4}\/\d{1,2}\/\d{1,2}-\d{1,2}:\d{1,2}:\d{1,2}\])/g, '$1\n$2');
+
                         let newlineIndex;
                         while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
                             const line = buffer.slice(0, newlineIndex).trim();

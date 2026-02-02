@@ -20,7 +20,11 @@ const LABEL_PATTERN = /\]\[([a-zA-Z0-9_@~]+)\]/;
  * 合并多行日志（无时间戳的行合并到上一条）
  */
 export function parseLogContent(content: string): LogEntry[] {
-    const lines = content.split('\n');
+    // 修复丢失回车的问题: 如果时间戳前面不是换行符，强制添加换行
+    // 匹配: [2026/2/2-15:54:54] 格式
+    const fixedContent = content.replace(/([^\n])(\[\d{4}\/\d{1,2}\/\d{1,2}-\d{1,2}:\d{1,2}:\d{1,2}\])/g, '$1\n$2');
+    
+    const lines = fixedContent.split('\n');
     const mergedData: string[] = [];
     let currentEntry = '';
 
