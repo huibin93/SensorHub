@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { UploadCloud, FileText, Database, CheckCircle, Clock, X } from 'lucide-vue-next';
 import { useFileStore } from '../stores/fileStore';
+import { useAuthStore } from '../stores/auth';
 import { fileService } from '../services/fileService';
 import { ref, onMounted, onUnmounted } from 'vue';
 import ZstdWorker from '../workers/zstd.worker.js?worker';
@@ -12,6 +13,7 @@ import { workerService } from '../services/workerService';
 import { formatBytes, formatBytesSplit } from '../utils/format';
 
 const fileStore = useFileStore();
+const authStore = useAuthStore();
 
 // Upload Queue Overlay ref
 const uploadQueueRef = ref<InstanceType<typeof UploadQueueOverlay>>();
@@ -339,9 +341,12 @@ const processAndUploadWithTask = async (file: File, taskId: string) => {
         if (frameIndex) {
             formData.append('frame_index', JSON.stringify(frameIndex));
         }
-        
+
         const response = await fetch(`${API_BASE_URL}/files/upload`, {
             method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${authStore.token}`
+            },
             body: formData
         });
         

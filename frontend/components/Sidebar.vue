@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { LayoutDashboard, Activity, FileText, Settings, Database, ChevronLeft, ChevronRight, Network, FileSearch } from 'lucide-vue-next';
+import { ref, computed } from 'vue';
+import { LayoutDashboard, Activity, FileText, Settings, Database, ChevronLeft, ChevronRight, Network, FileSearch, Users, LogOut } from 'lucide-vue-next';
+import { useAuthStore } from '../stores/auth'; // Added
 
+const authStore = useAuthStore();
 const isCollapsed = ref(true);
 
 const toggleSidebar = () => {
@@ -16,15 +18,25 @@ const emit = defineEmits<{
   (e: 'navigate', id: string): void;
 }>();
 
-const menuItems = [
-  { label: 'Data Management', icon: Database, id: 'data' },
-  { label: 'Device Import', icon: Network, id: 'device' },
-  { label: 'Log Analysis', icon: FileSearch, id: 'logs' },
-  { label: 'Algorithm Analysis', icon: Activity, id: 'algo' },
-  { label: 'Report Center', icon: FileText, id: 'report' },
-  { label: 'Serial Tool', icon: LayoutDashboard, id: 'serial' },
-  { label: 'Settings', icon: Settings, id: 'settings' },
-];
+const menuItems = computed(() => {
+  const items = [
+    { label: 'Data Management', icon: Database, id: 'data' },
+    { label: 'Device Import', icon: Network, id: 'device' },
+    // Link to Log Analysis
+    { label: 'Log Analysis', icon: FileSearch, id: 'logs' },
+    { label: 'Algorithm Analysis', icon: Activity, id: 'algo' },
+    // Removed Report Center
+    { label: 'Serial Tool', icon: LayoutDashboard, id: 'serial' },
+    { label: 'Settings', icon: Settings, id: 'settings' },
+  ];
+  
+  // if (authStore.isAdmin) {
+  //     // Users now in Settings
+  //     // items.push({ label: 'User Management', icon: Users, id: 'users' });
+  // }
+  
+  return items;
+});
 </script>
 
 <template>
@@ -92,13 +104,22 @@ const menuItems = [
     <!-- Bottom User/Profile Area -->
     <div class="p-5 border-t border-slate-200/60 shrink-0">
         <div class="flex items-center gap-3.5" :class="isCollapsed ? 'justify-center' : ''">
-             <div class="w-9 h-9 rounded-full bg-white flex items-center justify-center text-xs font-bold text-slate-700 ring-2 ring-slate-100 shrink-0 shadow-sm">
-                JD
+             <div class="w-9 h-9 rounded-full bg-white flex items-center justify-center text-xs font-bold text-slate-700 ring-2 ring-slate-100 shrink-0 shadow-sm uppercase">
+                {{ authStore.user?.substring(0, 2) || 'GU' }}
              </div>
              <div class="flex flex-col whitespace-nowrap overflow-hidden transition-all duration-300" :class="{ 'w-0 opacity-0': isCollapsed }">
-                 <span class="text-sm font-semibold text-slate-700 truncate">John Doe</span>
-                 <span class="text-xs text-slate-500 truncate">Admin Workspace</span>
+                 <span class="text-sm font-semibold text-slate-700 truncate">{{ authStore.user || 'Guest' }}</span>
+                 <span class="text-xs text-slate-500 truncate">{{ authStore.role === 'admin' ? 'Administrator' : 'User' }}</span>
              </div>
+             
+             <button 
+                v-if="!isCollapsed"
+                @click="authStore.logout()"
+                class="ml-auto text-slate-400 hover:text-red-500 transition-colors"
+                title="Logout"
+             >
+                <LogOut :size="16" />
+             </button>
         </div>
     </div>
   </aside>

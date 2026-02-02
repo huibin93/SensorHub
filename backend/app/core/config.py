@@ -30,6 +30,16 @@ class CorsConfig(BaseModel):
     allowed_origins: list[str]
 
 
+
+class SecurityConfig(BaseModel):
+    """安全配置;"""
+    SECRET_KEY: str = "changethis"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ADMIN_USER: str = "admin"
+    ADMIN_PASSWORD: str = "admin"
+
+
 class DatabaseConfig(BaseModel):
     """数据库配置;"""
     directory: str
@@ -78,6 +88,7 @@ class Settings(BaseSettings):
     server: ServerConfig
     cors: CorsConfig
     database: DatabaseConfig
+    security: SecurityConfig = SecurityConfig()
 
     # 固定/计算字段
     API_V1_STR: str = "/api/v1"
@@ -123,6 +134,13 @@ class Settings(BaseSettings):
         """是否使用测试数据库;"""
         return self.database.use_test_db
 
+    model_config = {
+        "env_nested_delimiter": "__",
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore"
+    }
+
     @classmethod
     def settings_customise_sources(
         cls,
@@ -132,8 +150,13 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> Tuple[PydanticBaseSettingsSource, ...]:
-        """自定义配置源,仅使用 JSON 文件;"""
-        return (JsonConfigSettingsSource(settings_cls),)
+        """自定义配置源: Init args > Env > DotEnv > JSON > Defaults"""
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            JsonConfigSettingsSource(settings_cls),
+        )
 
 
 settings = Settings()

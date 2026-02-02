@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router';
 import { 
   Search, Filter, ChevronDown, Eye, Download, MoreHorizontal, 
   RotateCw, Play, Zap, Edit2, Watch, Circle, Trash2, ChevronLeft, ChevronRight,
-  ExternalLink
+  ExternalLink, Share2 // Added Share2
 } from 'lucide-vue-next';
 import { SensorFile, FileStatus, DeviceType } from '../types';
 import StatusBadge from './StatusBadge.vue';
@@ -14,10 +14,13 @@ import EditableNoteCell from './EditableNoteCell.vue';
 import EditableDeviceCell from './EditableDeviceCell.vue';
 import BatchEditModal from './BatchEditModal.vue';
 import FilePreviewDrawer from './FilePreviewDrawer.vue';
+import ShareModal from './ShareModal.vue'; // Added
 import { useFileStore } from '../stores/fileStore';
+import { useAuthStore } from '../stores/auth'; // Added
 
 // ===== STORE =====
 const fileStore = useFileStore();
+const authStore = useAuthStore(); // Added
 const { files, isLoading } = storeToRefs(fileStore);
 const router = useRouter();
 
@@ -25,6 +28,8 @@ const router = useRouter();
 const selectedIds = ref<Set<string>>(new Set());
 const activeRowMenu = ref<string | null>(null);
 const showBatchEditModal = ref(false);
+const showShareModal = ref(false); // Added
+const shareTarget = ref<{id: string, name: string} | null>(null); // Added
 const contextMenuRow = ref<string | null>(null);
 const contextMenuPosition = ref({ x: 0, y: 0 });
 const filterDevice = ref<string>('All');
@@ -206,6 +211,15 @@ const downloadRow = (id: string) => {
     activeRowMenu.value = null;
 };
 
+const handleShare = (id: string) => {
+    const file = files.value.find(f => f.id === id);
+    if (file) {
+        shareTarget.value = { id, name: file.filename };
+        showShareModal.value = true;
+    }
+    activeRowMenu.value = null;
+};
+
 // ===== UI HELPERS =====
 const handleClickOutside = (event: MouseEvent) => {
     if (activeRowMenu.value && !(event.target as Element).closest('.row-menu-container')) {
@@ -342,6 +356,7 @@ const openInNewPage = (rowId: string) => {
                 <Download :size="16" /> Download
             </button>
             <button 
+                v-if="authStore.isAdmin"
                 @click="handleBatchDelete"
                 class="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 hover:border-red-200 transition-colors shadow-sm whitespace-nowrap"
             >
@@ -505,6 +520,13 @@ const openInNewPage = (rowId: string) => {
                             <Download :size="16" /> Download
                         </button>
                         <button 
+                            @click="handleShare(row.id)"
+                            class="w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2"
+                        >
+                            <Share2 :size="16" /> Share
+                        </button>
+                        <button 
+                            v-if="authStore.isAdmin"
                             @click="deleteRow(row.id)"
                             class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
                         >
@@ -605,11 +627,17 @@ const openInNewPage = (rowId: string) => {
         @confirm="onBatchEditConfirm"
     />
 
-    <!-- File Preview Drawer -->
     <FilePreviewDrawer 
         :is-open="isDrawerOpen" 
         :id="previewFileId"
         @close="closeDrawer"
+    />
+    
+    <ShareModal
+        :is-open="showShareModal"
+        :file-id="shareTarget?.id || null"
+        :filename="shareTarget?.name || null"
+        @close="showShareModal = false"
     />
   </div>
 </template>

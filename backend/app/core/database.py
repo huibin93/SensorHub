@@ -22,6 +22,7 @@ def init_db() -> None:
     # 确保模型已被导入以注册 metadata
     from app.models.sensor_file import SensorFile, PhysicalFile
     from app.models.dictionary import TestType, TestSubType
+    from app.models.user import User, SharedLink
     SQLModel.metadata.create_all(engine)
     
     # 初始化最基础的字典数据

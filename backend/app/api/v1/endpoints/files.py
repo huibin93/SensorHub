@@ -10,8 +10,8 @@ from sqlmodel import Session
 from typing import List, Optional, Any
 import uuid
 import json
-from datetime import datetime
-
+from datetime import datetime, timedelta
+from sqlmodel import Session, select
 from app.api import deps
 from app.schemas import api_models
 from app.crud import file as crud
@@ -19,8 +19,11 @@ from app.services.storage import StorageService
 from app.services.parser import ParserService
 from app.services.metadata import parse_filename, ensure_test_types_exist
 from app.models.sensor_file import SensorFile, PhysicalFile
+from app.models import User, SharedLink # Added models
 from app.core.logger import logger
 from app.core.database import engine
+from app.api.v1 import dependencies as auth_deps # Auth Dependencies
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -166,7 +169,8 @@ async def upload_file(
     original_size: int = Form(...),
     deviceType: Optional[str] = Form("Unknown"),
     frame_index: Optional[str] = Form(None, description="Frame index JSON for seekable access"),
-    session: Session = Depends(deps.get_db)
+    session: Session = Depends(deps.get_db),
+    current_user: dict = Depends(auth_deps.get_current_user) # Require Auth
 ) -> Any:
     """
     流式上传 Zstd 压缩文件 (接口 v2);
@@ -325,6 +329,8 @@ async def upload_file(
             deviceModel="Unknown",
             size=size_str,
             file_size_bytes=original_size, # 保存 Int 大小 
+            # 记录上传者
+            uploaded_by=current_user.get("username", "Unknown"),
             name_suffix=name_suffix,
             uploadTime=datetime.utcnow().isoformat(),
             status="unverified",
@@ -392,9 +398,13 @@ def update_file(
 
 
 @router.delete("/files/{file_id}")
-def delete_file(file_id: str, session: Session = Depends(deps.get_db)) -> dict:
+def delete_file(
+    file_id: str, 
+    session: Session = Depends(deps.get_db),
+    current_user: dict = Depends(auth_deps.get_current_active_superuser) # Admin Only
+) -> dict:
     """
-    删除单个文件;
+    删除单个文件 (仅管理员);
 
     Args:
         file_id: 文件 ID;
@@ -410,21 +420,88 @@ def delete_file(file_id: str, session: Session = Depends(deps.get_db)) -> dict:
 @router.post("/files/batch-delete")
 def batch_delete(
     request: api_models.BatchDeleteRequest,
-    session: Session = Depends(deps.get_db)
+    session: Session = Depends(deps.get_db),
+    current_user: dict = Depends(auth_deps.get_current_active_superuser) # Admin Only
 ) -> dict:
     """
-    批量删除文件;
-
-    Args:
-        request: 包含要删除的文件 ID 列表;
-
-    Returns:
-        dict: 删除结果,包含删除数量;
+    批量删除文件 (仅管理员);
     """
     for fid in request.ids:
         crud.delete_file_safely(session, fid)
-        # StorageService.delete_file(fid)
     return {"success": True, "deleted": len(request.ids)}
+    
+    
+# --- Sharing & Public Access ---
+
+@router.post("/files/{file_id}/share")
+def share_file(
+    file_id: str,
+    days: int = Query(7, ge=1, le=30, description="Expiration in days (1-30)"),
+    session: Session = Depends(deps.get_db),
+    current_user: dict = Depends(auth_deps.get_current_user)
+) -> dict:
+    """
+    Create a shared link for a file.
+    """
+    file = crud.get_file(session, file_id)
+    if not file:
+        raise HTTPException(404, "File not found")
+        
+    # Create Token
+    token = str(uuid.uuid4()).replace("-", "") + str(uuid.uuid4()).replace("-", "")
+    expire_at = datetime.utcnow() + timedelta(days=days)
+    
+    link = SharedLink(
+        token=token,
+        sensor_file_id=file.id,
+        created_by_username=current_user["username"],
+        expire_at=expire_at
+    )
+    session.add(link)
+    session.commit()
+    session.refresh(link)
+    
+    return {
+        "token": link.token,
+        "expire_at": link.expire_at,
+        "url": f"/public/analysis?token={link.token}&fid={file.id}"
+    }
+
+
+@router.get("/public/file")
+def get_public_file(
+    token: str = Query(...),
+    session: Session = Depends(deps.get_db)
+) -> dict:
+    """
+    Access file data via shared token.
+    """
+    # 1. Validate Token
+    link = session.exec(select(SharedLink).where(SharedLink.token == token)).first()
+    if not link:
+        raise HTTPException(404, "Invalid or expired link")
+        
+    if link.expire_at < datetime.utcnow():
+        raise HTTPException(403, "Link expired")
+        
+    # 2. Get File
+    file = crud.get_file(session, link.sensor_file_id)
+    if not file:
+         raise HTTPException(404, "File not found")
+         
+    # 3. Return Data (Sanitized)
+    # Return structure similar to what frontend expects for loading
+    return {
+        "id": file.id,
+        "file_hash": file.file_hash,
+        "filename": file.filename,
+        "size": file.size,
+        "uploadTime": file.upload_time,
+        "status": file.status,
+        "processedDir": file.processed_dir,
+        "contentMeta": file.content_meta,
+        "token_valid": True
+    }
 
 
 @router.get("/files/{file_id}/structure")

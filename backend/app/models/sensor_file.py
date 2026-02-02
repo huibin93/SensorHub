@@ -71,6 +71,7 @@ class SensorFile(SQLModel, table=True):
     filename: str
     device_type: str = Field(alias="deviceType")
     status: str = Field(default="unverified")
+    uploaded_by: str = Field(default="Unknown", description="上传者用户名")
     
     # 这里的 size 仍保留作为显示用的字符串 (例如 "1.2 MB"),
     # 虽然物理大小在 PhysicalFile 中,但为了前端展示方便,保留快照。

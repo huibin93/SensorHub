@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1.endpoints import files, dictionaries, devices
+from app.api.v1.endpoints import files, dictionaries, devices, users
 from app.core.config import settings
 from app.core.database import init_db
 
@@ -40,6 +40,10 @@ def on_startup() -> None:
 app.include_router(dictionaries.router, prefix=f"{settings.API_V1_STR}", tags=["dictionaries"])
 app.include_router(files.router, prefix=f"{settings.API_V1_STR}", tags=["files"])
 app.include_router(devices.router, prefix=f"{settings.API_V1_STR}", tags=["devices"])
+app.include_router(users.router, prefix=f"{settings.API_V1_STR}/users", tags=["users"])
+
+from app.api.v1.endpoints import auth
+app.include_router(auth.router, prefix=f"{settings.API_V1_STR}", tags=["auth"])
 
 logger.info("Application startup complete.")
 
