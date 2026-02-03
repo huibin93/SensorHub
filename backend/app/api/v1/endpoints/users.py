@@ -36,7 +36,7 @@ def read_users(
 def create_user(
     *,
     session: Session = Depends(get_session),
-    user_in: User, # This might try to parse ID... better to use pure params or separate schema if possible.
+
     # auth.py used individual params: username: str, password: str. Let's stick to that for consistency/simplicity.
     username: str = Body(...),
     password: str = Body(...),

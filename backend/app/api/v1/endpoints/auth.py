@@ -46,9 +46,10 @@ def login_access_token(
         raise HTTPException(status_code=400, detail="Inactive user")
         
     access_token_expires = timedelta(minutes=settings.security.ACCESS_TOKEN_EXPIRE_MINUTES)
+    role = "admin" if user.is_superuser else "user"
     return {
         "access_token": security.create_access_token(
-            data={"sub": user.username, "role": "user"}, expires_delta=access_token_expires
+            data={"sub": user.username, "role": role}, expires_delta=access_token_expires
         ),
         "token_type": "bearer",
     }

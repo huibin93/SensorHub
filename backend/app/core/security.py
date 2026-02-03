@@ -3,16 +3,16 @@
 
 提供密码哈希、验证和 JWT Token 生成功能;
 """
+import bcrypt
 from datetime import datetime, timedelta
 from typing import Optional, Union
 
 from jose import jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
 
-# 密码哈希上下文
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# 密码哈希上下文 (Removed Passlib due to incompatibility with bcrypt 5.0+)
+# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -26,7 +26,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         bool: 验证结果
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 
 def get_password_hash(password: str) -> str:
@@ -39,7 +39,7 @@ def get_password_hash(password: str) -> str:
     Returns:
         str: 哈希后的密码
     """
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

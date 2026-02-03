@@ -3,7 +3,7 @@
  * 独立日志查看页面
  * 提供完整的日志分析功能，包含筛选、标签、虚拟滚动
  */
-import { ref, onMounted, computed, watch, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Search, ChevronDown, ChevronUp, ChevronLeft, Filter, Tag } from 'lucide-vue-next';
 import { useLogAnalysisStore, type LogFile } from '../stores/logAnalysisStore';
@@ -49,6 +49,9 @@ const currentFile = computed<LogFile | null>(() => {
 });
 
 // 初始化
+// 状态
+let resizeObserver: ResizeObserver | null = null;
+
 onMounted(async () => {
   // 如果 Store 为空，尝试重新初始化
   if (logStore.files.length === 0) {
@@ -66,8 +69,22 @@ onMounted(async () => {
   nextTick(() => {
     if (containerRef.value) {
       containerHeight.value = containerRef.value.clientHeight;
+      
+      // 监听容器大小变化
+      resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          containerHeight.value = entry.contentRect.height;
+        }
+      });
+      resizeObserver.observe(containerRef.value);
     }
   });
+});
+
+onUnmounted(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+  }
 });
 
 // 过滤后的条目
@@ -399,37 +416,41 @@ watch(searchQuery, () => {
                 right: 0,
                 height: LINE_HEIGHT + 'px'
               }"
-              class="px-6 flex items-center gap-2 hover:bg-white/50"
+              class="px-6 whitespace-nowrap"
               :class="{
-                'bg-yellow-50': searchMatches.includes(entry.visibleIndex)
+                'hover:bg-white/50': !(searchMatches.length > 0 && entry.visibleIndex === searchMatches[currentMatch]),
+                'bg-yellow-100 hover:bg-yellow-100': searchMatches.length > 0 && entry.visibleIndex === searchMatches[currentMatch],
+                'bg-yellow-50': searchMatches.includes(entry.visibleIndex) && (searchMatches.length === 0 || entry.visibleIndex !== searchMatches[currentMatch])
               }"
             >
               <!-- Line Number -->
-              <span class="w-12 text-right text-slate-400 text-xs shrink-0 select-none">
+              <span class="inline-block w-12 text-right text-slate-400 text-xs select-none mr-2 align-middle">
                 {{ entry.lineIndex + 1 }}
               </span>
               
               <!-- Time -->
-              <span class="text-blue-600 text-xs shrink-0 w-36 select-all">
+              <span class="inline-block text-blue-600 text-xs w-36 select-all mr-2 align-middle">
                 {{ entry.time }}
               </span>
               
               <!-- Label -->
               <span 
-                class="px-1.5 py-0.5 text-[10px] font-semibold rounded shrink-0 min-w-[80px] text-center select-none cursor-pointer hover:opacity-80"
+                class="inline-block px-1.5 py-0.5 text-[10px] font-semibold rounded min-w-[80px] text-center mr-2 align-middle"
                 :class="entry.label === 'Unknown' 
                   ? 'bg-slate-200 text-slate-600' 
                   : 'bg-amber-100 text-amber-700'"
-                @click="jumpToLabel(entry.label)"
               >
                 {{ entry.label }}
               </span>
               
               <!-- Content -->
               <span 
-                class="text-slate-800 whitespace-pre"
+                class="inline-block text-slate-800 whitespace-pre align-middle"
                 v-html="highlightText(entry.content, entry.visibleIndex)"
               ></span>
+              
+              <!-- Hidden Newline for Copy -->
+              <span class="inline-block w-[1px] h-[1px] overflow-hidden whitespace-pre opacity-0 select-text">{{ '\n' }}</span>
             </div>
           </div>
         </div>
