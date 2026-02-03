@@ -93,8 +93,15 @@ class SensorFile(SQLModel, table=True):
 
     # 新字段 (阶段 6b)
     tester: str = Field(default="")
-    mac: str = Field(default="")
+    mac: str = Field(default="") # 对应 metadata 中的 device_mac, 但保留旧字段以防万一
     collection_time: str = Field(default="") # 格式: YYYYMMDD_HHMMSS
+    
+    # Metadata Parsing Integration (2026-02-04)
+    start_time: str = Field(default="", description="From metadata: startTime")
+    device_name: str = Field(default="", description="From metadata: device (without parens)")
+    device_mac: str = Field(default="", description="From metadata: device_mac")
+    device_version: str = Field(default="", description="From metadata: device version")
+    user_name: str = Field(default="", description="From metadata: user_name")
 
     # 可选字段
     error_message: Optional[str] = Field(default=None, alias="errorMessage")

@@ -18,6 +18,7 @@ from app.crud import file as crud
 from app.services.storage import StorageService
 from app.services.parser import ParserService
 from app.services.metadata import parse_filename, ensure_test_types_exist
+from app.services.file_service import FileService
 from app.models.sensor_file import SensorFile, PhysicalFile
 from app.models import User, SharedLink # Added models
 from app.core.logger import logger
@@ -134,30 +135,6 @@ def check_file(
             }
     
     return {"exists": False, "exact_match": False}
-
-
-# --- Background Tasks ---
-def verify_upload_task(file_id: str, md5: str, path: str):
-    """
-    后台校验任务: 检查文件完整性并更新 DB Status
-    """
-    logger.info(f"Starting background verification for file {file_id}")
-    try:
-        is_valid = StorageService.verify_integrity(Path(path), md5)
-        
-        with Session(engine) as session:
-            if is_valid:
-                crud.update_file(session, file_id, {"status": "idle"})
-                logger.info(f"File {file_id} verified successfully.")
-            else:
-                msg = "Integrity Check Failed"
-                crud.update_file(session, file_id, {"status": "error", "notes": msg, "error_message": msg})
-                logger.error(f"File {file_id} validation failed.")
-    except Exception as e:
-        logger.error(f"Error in verify_upload_task: {e}")
-        with Session(engine) as session:
-            msg = f"Verification Error: {str(e)}"
-            crud.update_file(session, file_id, {"status": "error", "notes": msg, "error_message": msg})
 
 
 @router.post("/files/upload", response_model=Any) # Return Any to support flexible JSON
@@ -354,7 +331,7 @@ async def upload_file(
         crud.create_file(session, new_sf)
         
         # 5. 触发后台校验
-        background_tasks.add_task(verify_upload_task, file_id, md5, saved_path)
+        background_tasks.add_task(FileService.verify_upload_task, file_id, md5, saved_path)
         
         return {
             "code": 200,
@@ -666,44 +643,15 @@ def batch_download(
         raise HTTPException(400, "No valid files found")
         
     try:
-        # 2. 创建临时 Zip 文件
-        # delete=False 因为 FileResponse 需要读取它, 之后由 BackgroundTask 清理?
-        # 或者使用 tempfile.NamedTemporaryFile 并依赖 OS 清理 (但在 Windows 上 FileResponse 打开时可能锁住)
-        # 更好的方式是每次请求生成一个临时文件，依靠 FileResponse(background=...) 清理
-        
-        tmp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip", prefix="batch_")
-        tmp_zip.close() # 关闭句柄，让 zipfile 打开
-        
-        with zipfile.ZipFile(tmp_zip.name, 'w', zipfile.ZIP_STORED) as zf:
-            for file in files_to_download:
-                raw_path = StorageService.get_raw_path(file.file_hash)
-                if not raw_path.exists():
-                    logger.warning(f"Batch download skipping missing file: {file.id} ({file.file_hash})")
-                    continue
-                
-                # 构建 Zip 内的文件名
-                base_name = file.filename
-                suffix = file.name_suffix or ""
-                
-                if suffix:
-                    if base_name.lower().endswith(".rawdata"):
-                         # data.rawdata + (1) -> data (1).rawdata.zst
-                        stem = base_name[:-8]
-                        zip_entry_name = f"{stem}{suffix}.rawdata.zst"
-                    else:
-                        zip_entry_name = f"{base_name}{suffix}.zst"
-                else:
-                    zip_entry_name = f"{base_name}.zst"
-                
-                # 添加到 Zip
-                zf.write(raw_path, arcname=zip_entry_name)
+        # 2. 使用 FileService 创建 Zip
+        zip_path = FileService.create_batch_zip(files_to_download)
         
         # 3. 返回响应
         return FileResponse(
-            path=tmp_zip.name,
+            path=zip_path,
             filename=f"sensorhub_batch_{datetime.now().strftime('%Y%m%d%H%M%S')}.zip",
             media_type="application/zip",
-            background=BackgroundTask(lambda p: Path(p).unlink(missing_ok=True), tmp_zip.name)
+            background=BackgroundTask(lambda p: Path(p).unlink(missing_ok=True), zip_path)
         )
         
     except Exception as e:

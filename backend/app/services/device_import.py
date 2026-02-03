@@ -101,82 +101,156 @@ class DownloadManager:
                 
                 md5 = hashlib.md5()
                 frame_index = []  # 帧索引表
-                compressor = zstd.ZstdCompressor(level=6)
-                
-                # 先下载到内存缓冲区, 然后分块压缩
-                # (对于大文件, 可以改为边下载边写入临时原始文件)
-                raw_buffer = bytearray()
-                
-                for chunk in resp.iter_content(chunk_size=8192):
-                    # 取消检查点
-                    if self.cancel_event.is_set():
-                        self.task_states[filename] = 'cancelled'
-                        return 
+                try:
+                    # 1. 准备流式处理变量
+                    compressor = zstd.ZstdCompressor(level=6)
+                    raw_buffer = bytearray()
+                    
+                    # 帧切分参数
+                    MIN_CHUNK_SIZE = 2 * 1024 * 1024  # 2MB
+                    MAX_CHUNK_SIZE = 4 * 1024 * 1024  # 4MB
+                    
+                    offset = 0          # 当前解压数据偏移量 (总累计)
+                    compressed_offset = 0 # 当前压缩文件偏移量
+                    
+                    metadata_extracted = False
+                    metadata_dict = {}
+                    
+                    with temp_path.open("wb") as f_out:
+                        for chunk in resp.iter_content(chunk_size=64 * 1024):
+                            if self.cancel_event.is_set():
+                                break
+                            
+                            if chunk:
+                                raw_buffer.extend(chunk)
+                                md5.update(chunk)
+                                
+                                # Metadata Extraction (从前 64KB 提取)
+                                if not metadata_extracted and len(raw_buffer) >= 1024:
+                                    try:
+                                        # 仅取头部解码
+                                        peek_len = min(len(raw_buffer), 64 * 1024) 
+                                        peek_content = raw_buffer[:peek_len].decode('utf-8', errors='ignore')
+                                        from app.services.metadata_parser import extract_metadata_from_content
+                                        metadata_dict = extract_metadata_from_content(peek_content)
+                                        metadata_extracted = True
+                                        logger.info(f"Metadata extracted for {filename}: {metadata_dict.get('device_mac', 'N/A')}")
+                                    except Exception as ex:
+                                        logger.warning(f"Failed to extract metadata during download: {ex}")
+                                        metadata_extracted = True # Avoid processing again
 
-                    if chunk:
-                        raw_buffer.extend(chunk)
-                        md5.update(chunk)
-                
+                                # Streaming Chunk Processing
+                                # 当缓冲区足够大 (超过最大块大小 OR 只要超过最小块大小且有换行符?)
+                                # 为了简单且高效，我们尽可能攒够 4MB 或者直到遇到换行
+                                while len(raw_buffer) >= MAX_CHUNK_SIZE:
+                                    # 在区间 [MIN, MAX] 寻找换行符
+                                    # 但 Buffer 可能直接非常大?
+                                    # 切分逻辑:
+                                    # 1. 截取前 MAX_CHUNK_SIZE
+                                    # 2. 在 [MIN, MAX] 范围内找换行
+                                    
+                                    # 如果 buffer 甚至还不够 MIN，但我们已经知道它 > MAX? (逻辑上 impossible unless MIN > MAX)
+                                    search_start = MIN_CHUNK_SIZE
+                                    search_end = MAX_CHUNK_SIZE
+                                    
+                                    newline_pos = raw_buffer.find(b'\n', search_start, search_end)
+                                    
+                                    cut_pos = 0
+                                    ends_with_newline = False
+                                    
+                                    if newline_pos != -1:
+                                        cut_pos = newline_pos + 1
+                                        ends_with_newline = True
+                                    else:
+                                        # 未找到换行，强制在 MAX 处截断
+                                        cut_pos = MAX_CHUNK_SIZE
+                                        # Check if accidentally ended with newline
+                                        if raw_buffer[cut_pos-1] == 10: # 10 is \n
+                                            ends_with_newline = True
+
+                                    # Extract, Compress, Write
+                                    chunk_data = raw_buffer[:cut_pos]
+                                    del raw_buffer[:cut_pos] # Remove processed
+                                    
+                                    compressed_chunk = compressor.compress(chunk_data)
+                                    f_out.write(compressed_chunk)
+                                    
+                                    c_len = len(compressed_chunk)
+                                    d_len = len(chunk_data)
+                                    
+                                    frame_index.append({
+                                        "cs": compressed_offset,
+                                        "cl": c_len,
+                                        "ds": offset,
+                                        "dl": d_len,
+                                        "nl": ends_with_newline
+                                    })
+                                    
+                                    compressed_offset += c_len
+                                    offset += d_len
+
+                        # 处理剩余数据 (End of Stream)
+                        if not self.cancel_event.is_set() and len(raw_buffer) > 0:
+                            # 如果此时还没提取元数据 (文件极小)，尝试提取
+                            if not metadata_extracted:
+                                try:
+                                    peek_content = raw_buffer.decode('utf-8', errors='ignore')
+                                    from app.services.metadata_parser import extract_metadata_from_content
+                                    metadata_dict = extract_metadata_from_content(peek_content)
+                                except:
+                                    pass
+
+                            # 循环处理剩余 buffer (若剩余 > MAX_CHUNK_SIZE, 虽不太可能因为上面循环处理了, 但以防万一)
+                            while raw_buffer:
+                                cut_pos = min(len(raw_buffer), MAX_CHUNK_SIZE)
+                                # 尝试找换行
+                                if len(raw_buffer) >= MIN_CHUNK_SIZE:
+                                    limit = min(len(raw_buffer), MAX_CHUNK_SIZE)
+                                    nl = raw_buffer.find(b'\n', MIN_CHUNK_SIZE, limit)
+                                    if nl != -1:
+                                        cut_pos = nl + 1
+                                
+                                ends_with_newline = False
+                                if cut_pos > 0 and raw_buffer[cut_pos-1] == 10:
+                                    ends_with_newline = True
+                                    
+                                chunk_data = raw_buffer[:cut_pos]
+                                del raw_buffer[:cut_pos]
+                                
+                                compressed_chunk = compressor.compress(chunk_data)
+                                f_out.write(compressed_chunk)
+                                
+                                c_len = len(compressed_chunk)
+                                d_len = len(chunk_data)
+                                
+                                frame_index.append({
+                                    "cs": compressed_offset,
+                                    "cl": c_len,
+                                    "ds": offset,
+                                    "dl": d_len,
+                                    "nl": ends_with_newline
+                                })
+                                compressed_offset += c_len
+                                offset += d_len
+
+                except Exception as stream_err:
+                     logger.error(f"Streaming error: {stream_err}")
+                     raise stream_err
+                     
                 if self.cancel_event.is_set():
                     self.task_states[filename] = 'cancelled'
                     return
                 
-                downloaded_bytes = len(raw_buffer)
+                downloaded_bytes = offset
                 
-                # 换行对齐分块压缩
-                MIN_CHUNK_SIZE = 2 * 1024 * 1024  # 2MB minimum
-                MAX_CHUNK_SIZE = 4 * 1024 * 1024  # 4MB maximum
-                compressed_offset = 0
-                offset = 0
+                # 释放内存 (accumulator already cleared)
                 
-                with temp_path.open("wb") as f_out:
-                    while offset < downloaded_bytes:
-                        # 计算初始结束位置 (至少 2MB)
-                        end = min(offset + MIN_CHUNK_SIZE, downloaded_bytes)
-                        ends_with_newline = False
-                        
-                        # 如果不是文件末尾, 向后搜索换行符
-                        if end < downloaded_bytes:
-                            max_end = min(offset + MAX_CHUNK_SIZE, downloaded_bytes)
-                            
-                            # 从 end 向后搜索 \n (最多到 max_end)
-                            newline_pos = raw_buffer.find(b'\n', end, max_end)
-                            if newline_pos != -1:
-                                end = newline_pos + 1  # 包含换行符
-                                ends_with_newline = True
-                            else:
-                                end = max_end  # 未找到, 取到 max_end
-                        
-                        # 检查最后一个字符是否为换行
-                        if not ends_with_newline and end > 0 and raw_buffer[end - 1:end] == b'\n':
-                            ends_with_newline = True
-                        
-                        # 提取并压缩
-                        raw_chunk = bytes(raw_buffer[offset:end])
-                        chunk_len = len(raw_chunk)
-                        compressed_chunk = compressor.compress(raw_chunk)
-                        f_out.write(compressed_chunk)
-                        
-                        # 记录索引信息
-                        compressed_len = len(compressed_chunk)
-                        frame_index.append({
-                            "cs": compressed_offset,
-                            "cl": compressed_len,
-                            "ds": offset,
-                            "dl": chunk_len,
-                            "nl": ends_with_newline  # 是否以换行结束
-                        })
-                        
-                        compressed_offset += compressed_len
-                        offset = end
-                
-                # 释放内存
-                del raw_buffer
-
                 file_hash = md5.hexdigest()
                 final_path = StorageService.get_raw_path(file_hash)
                 compressed_size = temp_path.stat().st_size
                 
+                # ... standard dedup logic ...
+
                 # 文件去重
                 if final_path.exists():
                     logger.info(f"File {filename} ({file_hash}) already exists physically.")
@@ -187,7 +261,7 @@ class DownloadManager:
 
                 # 构建完整的帧索引
                 complete_frame_index = {
-                    "version": 2,  # 版本号升级
+                    "version": 2,
                     "frameSize": MIN_CHUNK_SIZE,
                     "maxFrameSize": MAX_CHUNK_SIZE,
                     "lineAligned": True,
@@ -219,6 +293,7 @@ class DownloadManager:
                 file_id = str(uuid.uuid4())
                 name_suffix = crud.get_next_naming_suffix(session, filename)
                 
+                # ... existing size formatting ...
                 # 格式化文件大小
                 total_size = downloaded_bytes
                 if total_size < 1024:
@@ -235,18 +310,27 @@ class DownloadManager:
                 if processed_dir.exists() and any(processed_dir.iterdir()):
                     initial_status = "processed"
 
-                # 解析文件名元数据
-                meta = parse_filename(filename)
+                # 解析文件名元数据 (fallback or supplementary)
+                meta_from_name = parse_filename(filename)
                 
-                # 自动插入字典条目
-                if meta.get("test_type_l1"):
-                    ensure_test_types_exist(session, meta.get("test_type_l1"), meta.get("test_type_l2"))
+                # 优先使用 metadata_dict 中的数据
+                # Clean device name (remove parens)
+                device_val = metadata_dict.get('device', '')
+                if '(' in device_val:
+                    device_val = device_val.split('(')[0].strip()
+                
+                # Merge or select
+                final_test_type_l1 = meta_from_name.get("test_type_l1", "Unknown")
+                final_test_type_l2 = meta_from_name.get("test_type_l2", "--")
+                
+                if final_test_type_l1 != "Unknown":
+                     ensure_test_types_exist(session, final_test_type_l1, final_test_type_l2)
 
                 new_sf = SensorFile(
                     id=file_id,
                     file_hash=file_hash,
                     filename=filename,
-                    deviceType=meta.get("deviceType", "Watch"),
+                    deviceType=meta_from_name.get("deviceType", "Watch"), 
                     deviceModel="Unknown",
                     size=size_str,
                     file_size_bytes=total_size,
@@ -255,14 +339,22 @@ class DownloadManager:
                     status=initial_status,
                     processedDir=str(processed_dir),
                     
-                    test_type_l1=meta.get("test_type_l1", "Unknown"),
-                    test_type_l2=meta.get("test_type_l2", "--"),
-                    tester=meta.get("tester", ""),
-                    mac=meta.get("mac", ""),
-                    collection_time=meta.get("collection_time", "")
+                    test_type_l1=final_test_type_l1,
+                    test_type_l2=final_test_type_l2,
+                    tester=meta_from_name.get("tester", ""),
+                    mac=meta_from_name.get("mac", ""),
+                    collection_time=meta_from_name.get("collection_time", ""),
+                    
+                    # New Metadata Fields
+                    start_time=metadata_dict.get('startTime', ''),
+                    device_name=device_val,
+                    device_mac=metadata_dict.get('device_mac', ''),
+                    device_version=metadata_dict.get('device version', '') or metadata_dict.get('device_version', ''),
+                    user_name=metadata_dict.get('user_name', ''),
+                    content_meta=metadata_dict
                 )
                 crud.create_file(session, new_sf)
-                logger.info(f"Registered {filename} as {file_id}")
+                logger.info(f"Registered {filename} as {file_id} with metadata")
                 self.task_states[filename] = 'success'
                 
         except Exception as e:
