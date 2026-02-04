@@ -42,8 +42,9 @@ app.include_router(files.router, prefix=f"{settings.API_V1_STR}", tags=["files"]
 app.include_router(devices.router, prefix=f"{settings.API_V1_STR}", tags=["devices"])
 app.include_router(users.router, prefix=f"{settings.API_V1_STR}/users", tags=["users"])
 
-from app.api.v1.endpoints import auth
+from app.api.v1.endpoints import auth, log_parser
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}", tags=["auth"])
+app.include_router(log_parser.router, prefix=f"{settings.API_V1_STR}/log-parser", tags=["log-parser"])
 
 logger.info("Application startup complete.")
 

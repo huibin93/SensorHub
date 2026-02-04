@@ -10,8 +10,8 @@ export interface LogEntry {
     lineIndex: number; // 原始行号
 }
 
-// 时间戳匹配: [2026/1/13-3:0:48]
-const TIMESTAMP_PATTERN = /^\[\d{4}\/\d{1,2}\/\d{1,2}-\d{1,2}:\d{1,2}:\d{1,2}\]/;
+// 时间戳匹配: [2026/1/13-3:0:48] 或 [[2026/2/4-10:11:24]]
+const TIMESTAMP_PATTERN = /^\[{1,2}\d{4}\/\d{1,2}\/\d{1,2}-\d{1,2}:\d{1,2}:\d{1,2}\]{1,2}/;
 // 标签匹配: ][label_name]
 const LABEL_PATTERN = /\]\[([a-zA-Z0-9_@~]+)\]/;
 
@@ -21,9 +21,9 @@ const LABEL_PATTERN = /\]\[([a-zA-Z0-9_@~]+)\]/;
  */
 export function parseLogContent(content: string): LogEntry[] {
     // 修复丢失回车的问题: 如果时间戳前面不是换行符，强制添加换行
-    // 匹配: [2026/2/2-15:54:54] 格式
-    const fixedContent = content.replace(/([^\n])(\[\d{4}\/\d{1,2}\/\d{1,2}-\d{1,2}:\d{1,2}:\d{1,2}\])/g, '$1\n$2');
-    
+    // 匹配: [2026/2/2-15:54:54] 或 [[2026/2/2-15:54:54]] 格式
+    const fixedContent = content.replace(/([^\n])(\[{1,2}\d{4}\/\d{1,2}\/\d{1,2}-\d{1,2}:\d{1,2}:\d{1,2}\]{1,2})/g, '$1\n$2');
+
     const lines = fixedContent.split('\n');
     const mergedData: string[] = [];
     let currentEntry = '';
@@ -63,16 +63,38 @@ export function parseLogContent(content: string): LogEntry[] {
         const timeStr = timeMatch ? timeMatch[0] : 'N/A';
 
         // 提取标签
-        const labelMatch = entry.match(LABEL_PATTERN);
-        const labelStr = labelMatch ? labelMatch[1] : 'Unknown';
+        let labelStr = 'Unknown';
+        // 尝试匹配 ][label] 格式
+        const bracketLabelMatch = entry.match(LABEL_PATTERN);
+
+        if (bracketLabelMatch) {
+            labelStr = bracketLabelMatch[1];
+        } else {
+            // 尝试匹配 " label: : " 格式
+            // 去掉时间戳后的内容
+            let tempContent = entry;
+            if (timeMatch) {
+                tempContent = tempContent.replace(timeMatch[0], '');
+            }
+            // 匹配 "wear_check_algo: :"
+            const colonMatch = tempContent.match(/^\s*([a-zA-Z0-9_]+):\s:/);
+            if (colonMatch) {
+                labelStr = colonMatch[1];
+            }
+        }
 
         // 提取内容（去掉时间戳和标签后的部分）
         let contentStr = entry;
         if (timeMatch) {
             contentStr = contentStr.replace(timeMatch[0], '');
         }
-        if (labelMatch) {
+        if (bracketLabelMatch) {
             contentStr = contentStr.replace(`[${labelStr}]`, '');
+        } else if (labelStr !== 'Unknown') {
+            // 移除 "label: :" 格式的前缀
+            // 注意: labelStr 可能是 user regex 匹配出来的
+            const colonPrefixRegex = new RegExp(`^\\s*${labelStr}:\\s:`);
+            contentStr = contentStr.replace(colonPrefixRegex, '');
         }
         contentStr = contentStr.trim();
 

@@ -5,10 +5,12 @@
  */
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Search, ChevronDown, ChevronUp, ChevronLeft, Filter, Tag } from 'lucide-vue-next';
+import { Search, ChevronDown, ChevronUp, ChevronLeft, Filter, Tag, Copy, Check } from 'lucide-vue-next';
 import { useLogAnalysisStore, type LogFile } from '../stores/logAnalysisStore';
 import { findFirstOccurrence } from '../utils/logParser';
 import type { LogEntry } from '../utils/logParser';
+import WearCheckChart from '../components/WearCheckChart.vue';
+import { BarChart2, X } from 'lucide-vue-next';
 
 const props = defineProps<{
   id: string;
@@ -39,6 +41,8 @@ const hideFilterInput = ref('');
 const showFilter = ref('');
 const hideFilter = ref('');
 const useRegex = ref(false);
+const isCopying = ref(false);
+const showChart = ref(false);
 
 // 标签选择
 const selectedLabels = ref<Set<string>>(new Set());
@@ -155,6 +159,25 @@ const visibleEntries = computed(() =>
 const handleScroll = (e: Event) => {
   const target = e.target as HTMLElement;
   scrollTop.value = target.scrollTop;
+};
+
+// 复制所有过滤后的日志
+const handleCopy = async () => {
+  if (filteredEntries.value.length === 0) return;
+  
+  const text = filteredEntries.value
+    .map(e => `[${e.time}] ${e.label}: ${e.content}`)
+    .join('\n');
+    
+  try {
+    await navigator.clipboard.writeText(text);
+    isCopying.value = true;
+    setTimeout(() => {
+      isCopying.value = false;
+    }, 2000);
+  } catch (err) {
+    console.error('Failed to copy', err);
+  }
 };
 
 // 搜索逻辑
@@ -377,6 +400,32 @@ watch(searchQuery, () => {
           Clear
         </button>
 
+
+        <div class="w-px h-4 bg-slate-200 mx-2"></div>
+        
+        <button
+          v-if="filteredEntries.length > 0"
+          @click="handleCopy"
+          class="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold bg-white border border-slate-200 rounded hover:bg-slate-50 hover:text-slate-900 transition-colors"
+          :class="isCopying ? 'text-green-600 border-green-200 bg-green-50' : 'text-slate-600'"
+          title="Copy all currently filtered logs"
+        >
+          <component :is="isCopying ? Check : Copy" :size="14" :class="isCopying ? 'text-green-600' : 'text-slate-400'" />
+          <span>{{ isCopying ? 'Copied!' : 'Copy All' }}</span>
+        </button>
+
+        <div class="w-px h-4 bg-slate-200 mx-2"></div>
+
+        <button
+          v-if="selectedLabels.has('wear_check_algo')"
+          @click="showChart = true"
+          class="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold bg-indigo-50 text-indigo-600 border border-indigo-200 rounded hover:bg-indigo-100 transition-colors"
+          title="Visualize Wear Check Algo Data"
+        >
+          <BarChart2 :size="14" />
+          <span>Visualize</span>
+        </button>
+
         <div class="flex-1"></div>
 
         <!-- Search -->
@@ -473,6 +522,19 @@ watch(searchQuery, () => {
     
     <div v-else class="flex-1 flex items-center justify-center text-slate-400">
       Loading...
+    </div>
+
+    <!-- Chart Drawer/Modal -->
+    <div v-if="showChart" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-8">
+      <div class="bg-white rounded-xl shadow-2xl w-full h-full max-w-7xl max-h-[90vh] flex flex-col overflow-hidden relative">
+        <button 
+          @click="showChart = false"
+          class="absolute top-4 right-4 z-10 p-2 bg-white/80 rounded-full hover:bg-slate-100 transition-colors"
+        >
+          <X :size="20" class="text-slate-600" />
+        </button>
+        <WearCheckChart :entries="filteredEntries" />
+      </div>
     </div>
   </div>
 </template>
