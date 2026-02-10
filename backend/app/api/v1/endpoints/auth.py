@@ -26,18 +26,7 @@ def login_access_token(
     """
     OAuth2 兼容的 Token 登录接口;
     """
-    # 1. Check Admin (Priority)
-    if form_data.username == settings.security.ADMIN_USER:
-        if form_data.password == settings.security.ADMIN_PASSWORD: # Simple Env Check
-             access_token_expires = timedelta(minutes=settings.security.ACCESS_TOKEN_EXPIRE_MINUTES)
-             return {
-                "access_token": security.create_access_token(
-                    data={"sub": form_data.username, "role": "admin"}, expires_delta=access_token_expires
-                ),
-                "token_type": "bearer",
-            }
-    
-    # 2. Check DB User
+    # 统一从数据库查询用户(包括admin)
     user = session.exec(select(User).where(User.username == form_data.username)).first()
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect email or password")
@@ -50,6 +39,23 @@ def login_access_token(
     return {
         "access_token": security.create_access_token(
             data={"sub": user.username, "role": role}, expires_delta=access_token_expires
+        ),
+        "token_type": "bearer",
+    }
+
+@router.post("/login/refresh-token")
+def refresh_access_token(
+    current_user: dict = Depends(dependencies.get_current_user),
+) -> Any:
+    """
+    刷新 Access Token (滑动会话);
+    """
+    access_token_expires = timedelta(minutes=settings.security.ACCESS_TOKEN_EXPIRE_MINUTES)
+    role = "admin" if current_user.get("is_superuser") else "user"
+    return {
+        "access_token": security.create_access_token(
+            data={"sub": current_user.get("username"), "role": role},
+            expires_delta=access_token_expires
         ),
         "token_type": "bearer",
     }

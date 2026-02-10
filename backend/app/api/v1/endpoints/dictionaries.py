@@ -8,7 +8,8 @@ from sqlmodel import Session, select
 from typing import List
 from app.api import deps
 from app.schemas import api_models
-from app.models.dictionary import DeviceModel, TestType, TestSubType
+from app.models.dictionary import TestType, TestSubType
+from app.models.device_mapping import DeviceMapping
 
 router = APIRouter()
 
@@ -16,59 +17,27 @@ router = APIRouter()
 @router.get("/devices", response_model=api_models.DevicesResponse)
 def get_devices(session: Session = Depends(deps.get_db)) -> api_models.DevicesResponse:
     """
-    获取所有设备型号列表;
+    获取所有设备型号列表 (基于 DeviceMapping 表);
 
     Returns:
         DevicesResponse: 按设备类型分组的型号列表;
     """
-    models = session.exec(select(DeviceModel)).all()
+    mappings = session.exec(select(DeviceMapping)).all()
 
-    devices_map = {}
+    devices_map: dict[str, list[str]] = {}
     # 确保默认类型存在
     default_types = ["Watch", "Ring"]
     for t in default_types:
         devices_map[t] = []
 
-    for m in models:
+    for m in mappings:
         if m.device_type not in devices_map:
             devices_map[m.device_type] = []
-        if m.model_name not in devices_map[m.device_type]:
-            devices_map[m.device_type].append(m.model_name)
+        if m.device_model not in devices_map[m.device_type]:
+            devices_map[m.device_type].append(m.device_model)
 
     result = [{"type": k, "models": v} for k, v in devices_map.items()]
     return {"devices": result}
-
-
-@router.post("/devices/models")
-def add_device_model(
-    req: api_models.AddDeviceModelRequest,
-    session: Session = Depends(deps.get_db)
-) -> dict:
-    """
-    添加新设备型号;
-
-    Args:
-        req: 包含设备类型和型号名称;
-
-    Returns:
-        dict: 添加结果;
-
-    Raises:
-        HTTPException: 型号已存在时抛出 400 错误;
-    """
-    # 检查是否已存在
-    existing = session.exec(select(DeviceModel).where(
-        DeviceModel.device_type == req.deviceType,
-        DeviceModel.model_name == req.modelName
-    )).first()
-
-    if existing:
-        raise HTTPException(status_code=400, detail="Model already exists")
-
-    model = DeviceModel(device_type=req.deviceType, model_name=req.modelName)
-    session.add(model)
-    session.commit()
-    return {"success": True, "message": f"Added {req.modelName}"}
 
 
 @router.get("/test-types", response_model=api_models.TestTypesResponse)

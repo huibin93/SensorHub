@@ -64,7 +64,7 @@ class SensorFile(SQLModel, table=True):
     # --- 基础信息 ---
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     filename: str = Field(index=True)      # 原始文件名 (e.g., "watch_test_01.txt")
-    upload_time: datetime = Field(default_factory=datetime.utcnow)
+    upload_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
     # --- 状态管理 ---
     status: str = Field(default="uploaded") # uploaded, parsing, ready, failed

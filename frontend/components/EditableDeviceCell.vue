@@ -8,28 +8,54 @@ import {
   addDeviceModel,
   fetchDevices
 } from '../stores/deviceStore';
+import { 
+  deviceMappings, 
+  fetchDeviceMappings, 
+  getDeviceMappingByName
+} from '../stores/deviceMappingStore';
 
 // Load devices on mount
 onMounted(() => {
     fetchDevices();
+    fetchDeviceMappings();
 });
 
 const props = defineProps<{
   initialDeviceType: DeviceType;
   initialDeviceModel: string;
+  initialDeviceName?: string;
   fileId: string;
 }>();
 
 const emit = defineEmits<{
-  (e: 'update', id: string, deviceType: DeviceType, deviceModel: string): void;
+  (e: 'update', id: string, deviceType: DeviceType, deviceModel: string, deviceName: string): void;
 }>();
 
 const isEditing = ref(false);
+const selectedDeviceName = ref(props.initialDeviceName || '');
 const selectedDeviceType = ref(props.initialDeviceType);
 const selectedDeviceModel = ref(props.initialDeviceModel);
 const showModelDropdown = ref(false);
+const showDeviceNameDropdown = ref(false);
 const searchQueryModel = ref('');
+const searchQueryDeviceName = ref('');
 const containerRef = ref<HTMLDivElement | null>(null);
+
+const displayName = computed(() => {
+  const name = props.initialDeviceName?.trim();
+  if (name) return name;
+  return props.initialDeviceModel || '';
+});
+
+const displaySubline = computed(() => {
+  const typeLabel = getDeviceTypeLabel(props.initialDeviceType);
+  const name = props.initialDeviceName?.trim();
+  if (name) {
+    const model = props.initialDeviceModel || 'Unknown model';
+    return `${model} / ${typeLabel}`;
+  }
+  return typeLabel;
+});
 
 // Get device icon component
 const getDeviceIcon = (deviceType: DeviceType) => {
@@ -100,13 +126,16 @@ const isMatchingSearch = (model: string): boolean => {
 
 // Start editing
 const startEdit = async () => {
+  selectedDeviceName.value = props.initialDeviceName || '';
   selectedDeviceType.value = props.initialDeviceType;
   selectedDeviceModel.value = props.initialDeviceModel;
   searchQueryModel.value = props.initialDeviceModel;
+  searchQueryDeviceName.value = props.initialDeviceName || '';
   isEditing.value = true;
   
   await nextTick();
   showModelDropdown.value = false;
+  showDeviceNameDropdown.value = false;
 };
 
 // Select device type
@@ -136,6 +165,31 @@ const selectModel = async (model: string) => {
   showModelDropdown.value = false;
 };
 
+// Device name selection
+const deviceNameOptions = computed(() => {
+  const allNames = [...new Set(deviceMappings.value.map(m => m.deviceName))];
+  const query = searchQueryDeviceName.value?.trim() || '';
+  
+  if (!query) return allNames;
+  
+  const lowerQuery = query.toLowerCase();
+  return allNames.filter(name => name.toLowerCase().includes(lowerQuery));
+});
+
+const selectDeviceName = (name: string) => {
+  selectedDeviceName.value = name;
+  searchQueryDeviceName.value = name;
+  showDeviceNameDropdown.value = false;
+  
+  // Auto-fill from mapping
+  const mapping = getDeviceMappingByName(name);
+  if (mapping) {
+    selectedDeviceType.value = mapping.deviceType as DeviceType;
+    selectedDeviceModel.value = mapping.deviceModel;
+    searchQueryModel.value = mapping.deviceModel;
+  }
+};
+
 // Save changes
 const save = async () => {
   const finalModel = searchQueryModel.value.trim() || selectedDeviceModel.value;
@@ -145,7 +199,8 @@ const save = async () => {
     addDeviceModel(selectedDeviceType.value, finalModel);
   }
   
-  emit('update', props.fileId, selectedDeviceType.value, finalModel);
+  const finalName = searchQueryDeviceName.value.trim() || selectedDeviceName.value;
+  emit('update', props.fileId, selectedDeviceType.value, finalModel, finalName);
   isEditing.value = false;
   showModelDropdown.value = false;
 };
@@ -154,7 +209,9 @@ const save = async () => {
 const cancel = () => {
   isEditing.value = false;
   showModelDropdown.value = false;
+  showDeviceNameDropdown.value = false;
   searchQueryModel.value = '';
+  searchQueryDeviceName.value = '';
 };
 
 // Keyboard handlers
@@ -211,9 +268,9 @@ const onModelInputInput = () => {
             class="text-slate-400" 
           />
         </div>
-        <span class="text-sm font-medium text-slate-700">{{ initialDeviceModel }}</span>
+        <span class="text-sm font-medium text-slate-700">{{ displayName }}</span>
       </div>
-      <span class="text-xs text-slate-400 pl-[26px]">{{ getDeviceTypeLabel(initialDeviceType) }}</span>
+      <span class="text-xs text-slate-400 pl-[26px]">{{ displaySubline }}</span>
     </div>
 
     <!-- EDIT MODE - Modal Overlay -->
@@ -235,6 +292,36 @@ const onModelInputInput = () => {
           >
             <X :size="16" class="text-slate-400" />
           </button>
+        </div>
+
+        <!-- Device Name Selection -->
+        <div class="mb-3">
+          <label class="block text-xs font-medium text-slate-600 mb-1">Device Name (Optional)</label>
+          <div class="relative">
+            <input
+              v-model="searchQueryDeviceName"
+              type="text"
+              placeholder="Select or type device name..."
+              class="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+              @focus="showDeviceNameDropdown = true"
+              @input="showDeviceNameDropdown = true"
+            />
+            
+            <!-- Device Name Dropdown -->
+            <div
+              v-if="showDeviceNameDropdown && deviceNameOptions.length > 0"
+              class="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-48 overflow-y-auto z-10"
+            >
+              <button
+                v-for="name in deviceNameOptions"
+                :key="name"
+                @click="selectDeviceName(name)"
+                class="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm transition-colors"
+              >
+                {{ name }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Device Type Selection -->

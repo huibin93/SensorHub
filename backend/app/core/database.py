@@ -21,8 +21,10 @@ def init_db() -> None:
     """
     # 确保模型已被导入以注册 metadata
     from app.models.sensor_file import SensorFile, PhysicalFile
+    from app.models.parse_result import ParseResult
     from app.models.dictionary import TestType, TestSubType
     from app.models.user import User, SharedLink
+    from app.models.device_mapping import DeviceMapping
     SQLModel.metadata.create_all(engine)
     
     # 初始化最基础的字典数据
@@ -31,22 +33,45 @@ def init_db() -> None:
 
 def _init_base_data() -> None:
     """
-    初始化最基础的字典数据;
+    初始化最基础的字典数据和管理员用户;
 
     仅在表为空时填充：
     - TestType: 'unknown' 类型
+    - Admin 用户: 从环境变量读取配置
     
-    DeviceType 和 DeviceModel 由前端添加或解析时自动创建;
+    DeviceMapping 由前端添加或解析时自动创建;
     """
     from app.models.dictionary import TestType, TestSubType
+    from app.models.user import User
+    from app.core import security
     
     with Session(engine) as session:
-        # 仅检查并添加 unknown 测试类型
+        # 1. 初始化测试类型
         if not session.exec(select(TestType)).first():
             session.add(TestType(id="unknown", name="Unknown"))
             session.add(TestSubType(test_type_id="unknown", name="--"))
             session.commit()
             logger.info("Initialized base test type: unknown")
+        
+        # 2. 初始化管理员用户
+        admin_username = settings.security.ADMIN_USER
+        admin_user = session.exec(
+            select(User).where(User.username == admin_username)
+        ).first()
+        
+        if not admin_user:
+            # 创建管理员用户
+            hashed_password = security.get_password_hash(settings.security.ADMIN_PASSWORD)
+            admin_user = User(
+                username=admin_username,
+                hashed_password=hashed_password,
+                is_active=True,
+                is_superuser=True,
+                is_deletable=False  # 管理员不可删除
+            )
+            session.add(admin_user)
+            session.commit()
+            logger.info(f"Created admin user: {admin_username}")
 
 
 def get_session():

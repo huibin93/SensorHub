@@ -84,6 +84,30 @@ watch([searchQuery, filterDevice, filterStatus, pageSize], () => {
     currentPage.value = 1;
 });
 
+// ===== TIME DISPLAY HELPER =====
+const getDisplayTime = (file: SensorFile): string => {
+    const timeValue = file.startTime || file.collectionTime || file.uploadTime;
+    if (!timeValue) return '--';
+    
+    try {
+        // Handle YYYYMMDD_HHMMSS format from collectionTime
+        if (timeValue.match(/^\d{8}_\d{6}$/)) {
+            const year = timeValue.substring(0, 4);
+            const month = timeValue.substring(4, 6);
+            const day = timeValue.substring(6, 8);
+            const hour = timeValue.substring(9, 11);
+            const minute = timeValue.substring(11, 13);
+            const second = timeValue.substring(13, 15);
+            return `${year}/${month}/${day} ${hour}:${minute}:${second}`;
+        }
+        
+        // Handle ISO format
+        return new Date(timeValue).toLocaleString();
+    } catch {
+        return timeValue;
+    }
+};
+
 const handlePageChange = (page: number) => {
     console.log(`[ClickLog] DataTable | Action: PageChange | Page: ${page}`);
     if (page >= 1 && page <= totalPages.value) {
@@ -141,8 +165,8 @@ const updateNote = (id: string, note: string) => {
     fileStore.updateNote(id, note);
 };
 
-const updateDevice = (id: string, deviceType: DeviceType, deviceModel: string) => {
-    fileStore.updateDevice(id, deviceType, deviceModel);
+const updateDevice = (id: string, deviceType: DeviceType, deviceModel: string, deviceName: string) => {
+    fileStore.updateDevice(id, deviceType, deviceModel, deviceName);
 };
 
 const triggerParse = (ids: string[]) => {
@@ -243,7 +267,7 @@ const isDrawerOpen = ref(false);
 const previewFileId = ref<string | null>(null);
 
 // ===== ACTIONS =====
-const viewFile = (id: string, event?: Event) => {
+const viewFile = (id: string, event?: MouseEvent) => {
     console.log(`[ClickLog] DataTable | Action: ViewFile | FileID: ${id}`);
     // If Ctrl/Cmd click, open in new tab directly
     if (event && (event.ctrlKey || event.metaKey)) {
@@ -431,7 +455,14 @@ const openInNewPage = (rowId: string) => {
             </td>
             <td class="px-4 py-3 whitespace-nowrap">
                 <div class="flex flex-col">
-                    <span class="text-sm text-slate-700 font-medium">{{ new Date(row.uploadTime).toLocaleString() }}</span>
+                    <div class="flex items-center gap-1">
+                        <span class="text-sm text-slate-700 font-medium">{{ getDisplayTime(row) }}</span>
+                        <span 
+                            v-if="!row.startTime && !row.collectionTime" 
+                            class="text-amber-500"
+                            title="Time source: Upload time (metadata missing)"
+                        >⚠</span>
+                    </div>
                     <span class="text-xs text-slate-500">{{ row.duration }} • {{ row.size }}</span>
                 </div>
             </td>
@@ -439,6 +470,7 @@ const openInNewPage = (rowId: string) => {
                 <EditableDeviceCell 
                     :initialDeviceType="row.deviceType"
                     :initialDeviceModel="row.deviceModel"
+                    :initialDeviceName="row.deviceName"
                     :fileId="row.id"
                     @update="updateDevice"
                 />

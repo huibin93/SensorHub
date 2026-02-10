@@ -6,11 +6,10 @@ import { fileService } from '../services/fileService';
 import { ref, onMounted, onUnmounted } from 'vue';
 import ZstdWorker from '../workers/zstd.worker.js?worker';
 import UploadQueueOverlay from './UploadQueueOverlay.vue';
-
 import { v4 as uuidv4 } from 'uuid';
-
 import { workerService } from '../services/workerService';
 import { formatBytes, formatBytesSplit } from '../utils/format';
+import apiClient from '../services/apiClient';
 
 const fileStore = useFileStore();
 const authStore = useAuthStore();
@@ -270,10 +269,14 @@ const processAndUploadWithTask = async (file: File, taskId: string) => {
         // 0. Fast Deduplication Check (Name + Size)
         uploadQueueRef.value?.updateProgress(taskId, 25);
         
-        const fastCheckUrl = `${API_BASE_URL}/files/check?filename=${encodeURIComponent(filename)}&size=${file.size}`;
         try {
-            const fastRes = await fetch(fastCheckUrl);
-            const fastData = await fastRes.json();
+            const fastRes = await apiClient.get(`${API_BASE_URL}/files/check`, {
+               params: {
+                   filename: filename,
+                   size: file.size
+               }
+            });
+            const fastData = fastRes.data;
             
             if (fastData.exists && fastData.exact_match) {
                  console.log(`[ActionArea] Fast Check: ${filename} (Size: ${file.size}) exists. Skipping.`);
@@ -295,9 +298,13 @@ const processAndUploadWithTask = async (file: File, taskId: string) => {
         uploadQueueRef.value?.updateProgress(taskId, 45);
         
         // 2. Check Deduplication
-        const checkUrl = `${API_BASE_URL}/files/check?hash=${hash}&filename=${encodeURIComponent(filename)}`;
-        const checkRes = await fetch(checkUrl);
-        const checkData = await checkRes.json();
+        const checkRes = await apiClient.get(`${API_BASE_URL}/files/check`, {
+            params: {
+                hash: hash,
+                filename: filename
+            }
+        });
+        const checkData = checkRes.data;
         uploadQueueRef.value?.updateProgress(taskId, 50);
         
         if (checkData.exists) {
@@ -342,21 +349,15 @@ const processAndUploadWithTask = async (file: File, taskId: string) => {
             formData.append('frame_index', JSON.stringify(frameIndex));
         }
 
-        const response = await fetch(`${API_BASE_URL}/files/upload`, {
-            method: 'POST',
+        const response = await apiClient.post(`${API_BASE_URL}/files/upload`, formData, {
             headers: {
-                'Authorization': `Bearer ${authStore.token}`
-            },
-            body: formData
+                'Content-Type': 'multipart/form-data'
+            }
         });
         
         uploadQueueRef.value?.updateProgress(taskId, 95);
         
-        if (!response.ok) {
-            throw new Error(`Failed to upload ${filename}: ${response.statusText}`);
-        }
-
-        const resData = await response.json();
+        const resData = response.data;
         
         if (resData.data && resData.data.is_duplicate) {
             uploadQueueRef.value?.markCompleted(taskId, 'Already exists');

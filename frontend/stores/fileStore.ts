@@ -132,8 +132,8 @@ export const useFileStore = defineStore('files', () => {
     /**
      * 更新文件设备信息
      */
-    async function updateDevice(id: string, deviceType: DeviceType, deviceModel: string) {
-        console.log('[FileStore] updateDevice called', { id, deviceType, deviceModel });
+    async function updateDevice(id: string, deviceType: DeviceType, deviceModel: string, deviceName?: string) {
+        console.log('[FileStore] updateDevice called', { id, deviceType, deviceModel, deviceName });
         const file = files.value.find(f => f.id === id);
         if (file) {
             const oldType = file.deviceType;
@@ -141,7 +141,9 @@ export const useFileStore = defineStore('files', () => {
             file.deviceType = deviceType;  // Optimistic update
             file.deviceModel = deviceModel;
             try {
-                await fileService.updateFile(id, { deviceType, deviceModel });
+                await fileService.updateFile(id, { deviceType, deviceModel, deviceName });
+                // Refetch all files to pick up cascaded device mapping changes
+                await fetchFiles();
             } catch (e) {
                 file.deviceType = oldType;  // Rollback on error
                 file.deviceModel = oldModel;
@@ -367,8 +369,8 @@ export const useFileStore = defineStore('files', () => {
 
         console.log(`[FileStore] Batch update complete. Success: ${successCount}, Failed: ${failCount}`);
 
-        // Refresh to ensure consistency if any failures
-        if (failCount > 0) {
+        // Refresh to ensure consistency (device changes cascade to other files)
+        if (failCount > 0 || payload.deviceType || payload.deviceModel) {
             fetchFiles();
         }
 

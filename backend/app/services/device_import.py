@@ -10,13 +10,15 @@ from pathlib import Path
 import uuid
 import hashlib
 import zstandard as zstd
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import Session
 
 from app.services.storage import StorageService
 from app.core.logger import logger
 from app.core.database import engine
 from app.crud import file as crud
+from app.crud import device_mapping as device_mapping_crud
+from app.crud import parse_result as parse_result_crud
 from app.models.sensor_file import SensorFile, PhysicalFile
 from app.services.metadata import parse_filename, ensure_test_types_exist
 
@@ -306,9 +308,9 @@ class DownloadManager:
                     size_str = f"{total_size/1024**3:.1f} GB"
 
                 processed_dir = StorageService.get_processed_dir(file_hash)
-                initial_status = "idle"
+                initial_parse_status = "idle"
                 if processed_dir.exists() and any(processed_dir.iterdir()):
-                    initial_status = "processed"
+                    initial_parse_status = "processed"
 
                 # 解析文件名元数据 (fallback or supplementary)
                 meta_from_name = parse_filename(filename)
@@ -318,6 +320,12 @@ class DownloadManager:
                 device_val = metadata_dict.get('device', '')
                 if '(' in device_val:
                     device_val = device_val.split('(')[0].strip()
+                
+                # Force uppercase for standardization
+                device_val = device_val.upper() if device_val else ""
+                
+                # Resolve device_type from DeviceMapping (for ParseResult snapshot)
+                resolved = device_mapping_crud.resolve_device_info(session, device_val)
                 
                 # Merge or select
                 final_test_type_l1 = meta_from_name.get("test_type_l1", "Unknown")
@@ -330,14 +338,11 @@ class DownloadManager:
                     id=file_id,
                     file_hash=file_hash,
                     filename=filename,
-                    deviceType=meta_from_name.get("deviceType", "Watch"), 
-                    deviceModel="Unknown",
                     size=size_str,
                     file_size_bytes=total_size,
                     name_suffix=name_suffix,
-                    uploadTime=datetime.utcnow().isoformat(),
-                    status=initial_status,
-                    processedDir=str(processed_dir),
+                    upload_time=datetime.now(timezone.utc).isoformat(),
+                    file_status="verified",
                     
                     test_type_l1=final_test_type_l1,
                     test_type_l2=final_test_type_l2,
@@ -351,9 +356,17 @@ class DownloadManager:
                     device_mac=metadata_dict.get('device_mac', ''),
                     device_version=metadata_dict.get('device version', '') or metadata_dict.get('device_version', ''),
                     user_name=metadata_dict.get('user_name', ''),
-                    content_meta=metadata_dict
                 )
                 crud.create_file(session, new_sf)
+                
+                # 创建 ParseResult
+                parse_result_crud.create_or_update(session, file_id, {
+                    "status": initial_parse_status,
+                    "device_type_used": resolved["device_type"],
+                    "content_meta": metadata_dict,
+                    "processed_dir": str(processed_dir),
+                })
+                
                 logger.info(f"Registered {filename} as {file_id} with metadata")
                 self.task_states[filename] = 'success'
                 

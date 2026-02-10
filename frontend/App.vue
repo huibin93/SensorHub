@@ -1,7 +1,20 @@
 <script setup lang="ts">
-// App.vue 现在只作为路由容器
+import { onMounted, onBeforeUnmount } from 'vue';
+import ToastHost from './components/ToastHost.vue';
+import { useAuthStore } from './stores/auth';
+
+const authStore = useAuthStore();
+
+onMounted(() => {
+  authStore.startHeartbeat();
+});
+
+onBeforeUnmount(() => {
+  authStore.stopHeartbeat();
+});
 </script>
 
 <template>
+  <ToastHost />
   <RouterView />
 </template>

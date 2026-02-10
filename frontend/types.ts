@@ -24,6 +24,7 @@ export interface SensorFile {
   filename: string;
   nameSuffix?: string; // Phase 5.6: Suffix for duplicate filenames " (1)"
   deviceType: DeviceType;
+  deviceName?: string; // From metadata
   status: FileStatus;
   size: string;
   duration: string;
@@ -34,6 +35,9 @@ export interface SensorFile {
 
   notes: string;
   uploadTime: string; // ISO string
+  startTime?: string; // From metadata
+  collectionTime?: string; // From metadata
+  timezone?: string; // GMT+08:00
   packets: PacketInfo[];
   errorMessage?: string;
 }

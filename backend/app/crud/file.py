@@ -7,6 +7,8 @@ from typing import List, Optional, Tuple
 from datetime import date
 from sqlmodel import Session, select, func, desc, or_, cast, Date
 from app.models.sensor_file import SensorFile, PhysicalFile
+from app.models.parse_result import ParseResult
+from app.models.device_mapping import DeviceMapping
 
 
 def get_stats(session: Session) -> dict:
@@ -29,12 +31,22 @@ def get_stats(session: Session) -> dict:
     ).one()
 
     # 计算今日待处理 (pendingTasks)
-    # 定义: 今日上传且状态为 'idle' 或 'unverified'
-    pending_count = session.exec(
+    # 定义: 今日上传且状态为 file_status='unverified' 或有 ParseResult 且 status='idle'
+    # 简化: file_status='unverified' 或 ParseResult.status in ('idle')
+    pending_unverified = session.exec(
         select(func.count(SensorFile.id))
         .where(func.date(SensorFile.upload_time) == date.today())
-        .where(or_(SensorFile.status == 'idle', SensorFile.status == 'unverified'))
+        .where(SensorFile.file_status == 'unverified')
     ).one()
+    
+    pending_idle = session.exec(
+        select(func.count(SensorFile.id))
+        .join(ParseResult, ParseResult.sensor_file_id == SensorFile.id)
+        .where(func.date(SensorFile.upload_time) == date.today())
+        .where(ParseResult.status == 'idle')
+    ).one()
+    
+    pending_count = pending_unverified + pending_idle
 
     # 计算总存储空间 (基于 PhysicalFile)
     total_bytes = session.exec(select(func.sum(PhysicalFile.size))).one() or 0
@@ -80,13 +92,29 @@ def get_files(
             SensorFile.notes.contains(search)
         ))
 
-    # 设备类型筛选
+    # 设备类型筛选 (通过 DeviceMapping JOIN)
     if device and device != "All":
-        query = query.where(SensorFile.device_type == device)
+        query = query.join(DeviceMapping, SensorFile.device_name == DeviceMapping.device_name, isouter=True).where(
+            DeviceMapping.device_type == device
+        )
 
-    # 状态筛选
+    # 状态筛选 (合并 file_status 和 ParseResult.status)
     if status and status != "All":
-        query = query.where(SensorFile.status == status)
+        if status == "unverified":
+            query = query.where(SensorFile.file_status == "unverified")
+        elif status == "error":
+            # 可能是文件错误或解析错误
+            query = query.outerjoin(ParseResult, ParseResult.sensor_file_id == SensorFile.id).where(
+                or_(
+                    SensorFile.file_status == "error",
+                    ParseResult.status == "error"
+                )
+            )
+        else:
+            # idle, processing, processed, failing → 查 ParseResult
+            query = query.join(ParseResult, ParseResult.sensor_file_id == SensorFile.id).where(
+                ParseResult.status == status
+            )
 
     # 计算总数
     total = len(session.exec(query).all())
@@ -98,14 +126,10 @@ def get_files(
     # 前端驼峰命名到数据库下划线命名的映射
     field_map = {
         "uploadTime": "upload_time",
-        "deviceType": "device_type",
-        "deviceModel": "device_model",
         "testTypeL1": "test_type_l1",
         "testTypeL2": "test_type_l2",
-        "rawPath": "raw_path",
-        "processedDir": "processed_dir",
-        "errorMessage": "error_message",
-        "contentMeta": "content_meta"
+        "fileStatus": "file_status",
+        "deviceName": "device_name",
     }
 
     db_field = field_map.get(sort_key, sort_key)
@@ -199,6 +223,13 @@ def delete_file_safely(session: Session, file_id: str) -> bool:
     sensor_file = session.get(SensorFile, file_id)
     if not sensor_file:
         return False
+    
+    # 1.5 删除关联的 ParseResult
+    parse_result = session.exec(
+        select(ParseResult).where(ParseResult.sensor_file_id == file_id)
+    ).first()
+    if parse_result:
+        session.delete(parse_result)
         
     target_hash = sensor_file.file_hash
     

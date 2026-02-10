@@ -26,7 +26,7 @@ def get_current_user(
     """
     获取当前用户;
     
-    验证 JWT Token,支持 Admin (env) 和 User (db) 两种模式;
+    验证 JWT Token 并从数据库查询用户(包括admin);
     返回包含 username 和 is_superuser 的字典;
     """
     try:
@@ -34,7 +34,6 @@ def get_current_user(
             token, settings.security.SECRET_KEY, algorithms=[settings.security.ALGORITHM]
         )
         username: str = payload.get("sub")
-        role: str = payload.get("role", "user")
         if username is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -46,16 +45,7 @@ def get_current_user(
             detail="Could not validate credentials",
         )
     
-    # 1. 检查是否是 Admin
-    if role == "admin":
-        if username == settings.security.ADMIN_USER:
-            return {
-                "username": username,
-                "is_superuser": True,
-                "id": None # Admin has no DB ID
-            }
-    
-    # 2. 检查数据库普通用户
+    # 统一从数据库查询用户(包括admin)
     user = session.exec(select(User).where(User.username == username)).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

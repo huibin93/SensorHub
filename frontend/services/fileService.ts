@@ -5,12 +5,13 @@
  * 配置从环境变量 (.env 文件) 中读取
  */
 
-import axios from 'axios';
+import apiClient from './apiClient';
 import { SensorFile, DeviceType, FileStatus } from '../types';
 import { MOCK_FILES } from '../constants';
 import { Decompress } from 'fzstd';
 import streamSaver from 'streamsaver';
 import { ZipWriter } from '@zip.js/zip.js';
+import { useAuthStore } from '../stores/auth';
 
 // ===== CONFIGURATION (from .env) =====
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
@@ -21,9 +22,9 @@ export interface FileUpdatePayload {
     notes?: string;
     deviceType?: DeviceType;
     deviceModel?: string;
+    deviceName?: string;
     testTypeL1?: string;
     testTypeL2?: string;
-    status?: FileStatus;
 }
 
 export interface StatsResponse {
@@ -66,7 +67,7 @@ export const fileService = {
             };
         }
 
-        const response = await axios.get<StatsResponse>(`${API_BASE_URL}/stats`);
+        const response = await apiClient.get<StatsResponse>(`${API_BASE_URL}/stats`);
         return response.data;
     },
 
@@ -86,7 +87,7 @@ export const fileService = {
             };
         }
 
-        const response = await axios.get<PaginatedFilesResponse>(`${API_BASE_URL}/files`, {
+        const response = await apiClient.get<PaginatedFilesResponse>(`${API_BASE_URL}/files`, {
             params: {
                 page: params.page || 1,
                 limit: params.limit || 20,
@@ -110,7 +111,7 @@ export const fileService = {
             return {} as SensorFile;
         }
 
-        const response = await axios.patch<SensorFile>(`${API_BASE_URL}/files/${id}`, data);
+        const response = await apiClient.patch<SensorFile>(`${API_BASE_URL}/files/${id}`, data);
         return response.data;
     },
 
@@ -124,7 +125,7 @@ export const fileService = {
             return;
         }
 
-        await axios.delete(`${API_BASE_URL}/files/${id}`);
+        await apiClient.delete(`${API_BASE_URL}/files/${id}`);
     },
 
     /**
@@ -137,7 +138,7 @@ export const fileService = {
             return;
         }
 
-        await axios.post(`${API_BASE_URL}/files/batch-delete`, { ids });
+        await apiClient.post(`${API_BASE_URL}/files/batch-delete`, { ids });
     },
 
     /**
@@ -164,7 +165,7 @@ export const fileService = {
         const formData = new FormData();
         formData.append('file', file);
 
-        const response = await axios.post(`${API_BASE_URL}/files/upload`, formData, {
+        const response = await apiClient.post(`${API_BASE_URL}/files/upload`, formData, {
             headers: {
                 'Content-Type': 'multipart/form-data'
             },
@@ -200,7 +201,7 @@ export const fileService = {
             };
         }
 
-        const response = await axios.get(`${API_BASE_URL}/files/${id}/structure`);
+        const response = await apiClient.get(`${API_BASE_URL}/files/${id}/structure`);
         return response.data;
     },
 
@@ -225,7 +226,7 @@ export const fileService = {
         if (options?.limit) params.append('limit', String(options.limit));
         if (options?.columns) params.append('columns', options.columns.join(','));
 
-        const response = await axios.get(
+        const response = await apiClient.get(
             `${API_BASE_URL}/files/${id}/data/${key}?${params.toString()}`
         );
         return response.data;
@@ -267,7 +268,19 @@ export const fileService = {
 
             // 2. Fetch .zst stream
             console.log(`[Download] [${Math.round(performance.now() - startTime)}ms] Fetching stream from backend...`);
-            const response = await fetch(`${API_BASE_URL}/files/${id}/download`);
+
+            const authStore = useAuthStore();
+            await authStore.ensureFreshToken();
+            const headers: HeadersInit = {};
+            if (authStore.token) {
+                headers['Authorization'] = `Bearer ${authStore.token}`;
+            }
+
+            const response = await fetch(`${API_BASE_URL}/files/${id}/download`, { headers });
+            if (response.status === 401) {
+                authStore.handleAuthExpired();
+                throw new Error('Unauthorized');
+            }
             if (!response.ok || !response.body) {
                 if (writer) {
                     writer.abort(); // Abort the streamSaver writer if fetch fails
@@ -343,6 +356,13 @@ export const fileService = {
         try {
             console.log(`[BatchDownload] Starting batch download for ${files.length} files.`);
 
+            const authStore = useAuthStore();
+            await authStore.ensureFreshToken();
+            const headers: HeadersInit = {};
+            if (authStore.token) {
+                headers['Authorization'] = `Bearer ${authStore.token}`;
+            }
+
             // 1. Setup Stream Saver for the ZIP file
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
             const zipFilename = `sensorhub_batch_${timestamp}.zip`;
@@ -374,7 +394,11 @@ export const fileService = {
 
                 try {
                     // Fetch .zst stream
-                    const response = await fetch(`${API_BASE_URL}/files/${file.id}/download`);
+                    const response = await fetch(`${API_BASE_URL}/files/${file.id}/download`, { headers });
+                    if (response.status === 401) {
+                        authStore.handleAuthExpired();
+                        throw new Error('Unauthorized');
+                    }
                     if (!response.ok || !response.body) {
                         throw new Error(`Failed to fetch ${name}: ${response.statusText}`);
                     }
@@ -446,7 +470,7 @@ export const fileService = {
             return { success: true, message: 'Mock parse triggered', status: 'Processing' };
         }
 
-        const response = await axios.post(`${API_BASE_URL}/files/${id}/parse`, { options });
+        const response = await apiClient.post(`${API_BASE_URL}/files/${id}/parse`, { options });
         return response.data;
     },
 
@@ -472,7 +496,7 @@ export const fileService = {
             };
         }
 
-        const response = await axios.get(`${API_BASE_URL}/files/${id}/content`, {
+        const response = await apiClient.get(`${API_BASE_URL}/files/${id}/content`, {
             params: { offset, limit }
         });
         return response.data;

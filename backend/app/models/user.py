@@ -2,21 +2,22 @@
 用户和权限相关的数据模型;
 """
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 from sqlmodel import SQLModel, Field, Relationship
 
 class User(SQLModel, table=True):
     """
     用户模型;
-    仅存储普通用户,Admin 账号可能仅存在于 .env 或作为特殊 User 记录;
+    存储所有用户包括管理员;
     """
     id: Optional[int] = Field(default=None, primary_key=True)
     username: str = Field(unique=True, index=True)
     hashed_password: str
     is_active: bool = Field(default=True)
     is_superuser: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    is_deletable: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class SharedLink(SQLModel, table=True):
@@ -34,7 +35,7 @@ class SharedLink(SQLModel, table=True):
     
     created_by_username: str = Field(description="创建者的用户名")
     
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     expire_at: datetime = Field(description="过期时间")
     views: int = Field(default=0, description="访问次数")
 

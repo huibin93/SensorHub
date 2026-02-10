@@ -4,29 +4,85 @@
 本模块提供传感器文件的 CRUD 操作、上传、下载、解析等 API 端点;
 """
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Header, BackgroundTasks
-from starlette.background import BackgroundTask
 from pathlib import Path
 from sqlmodel import Session
 from typing import List, Optional, Any
 import uuid
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlmodel import Session, select
 from app.api import deps
 from app.schemas import api_models
 from app.crud import file as crud
+from app.crud import device_mapping as device_mapping_crud
+from app.crud import parse_result as parse_result_crud
 from app.services.storage import StorageService
 from app.services.parser import ParserService
 from app.services.metadata import parse_filename, ensure_test_types_exist
 from app.services.file_service import FileService
 from app.models.sensor_file import SensorFile, PhysicalFile
-from app.models import User, SharedLink # Added models
+from app.models.parse_result import ParseResult
+from app.models.device_mapping import DeviceMapping
+from app.models import User, SharedLink
 from app.core.logger import logger
 from app.core.database import engine
-from app.api.v1 import dependencies as auth_deps # Auth Dependencies
+from app.api.v1 import dependencies as auth_deps
 from app.core.config import settings
 
 router = APIRouter()
+
+
+def _build_file_response(session: Session, file: SensorFile) -> dict:
+    """
+    将 SensorFile + ParseResult + DeviceMapping JOIN 展平为前端兼容的响应格式;
+    
+    Args:
+        session: 数据库会话;
+        file: SensorFile 对象;
+        
+    Returns:
+        dict: 展平后的文件响应;
+    """
+    # 获取 ParseResult (1:1)
+    pr = parse_result_crud.get_by_file_id(session, file.id)
+    
+    # 获取 DeviceMapping
+    dm = device_mapping_crud.get_device_mapping(session, file.device_name) if file.device_name else None
+    
+    # 合并状态: ParseResult.status 优先, 否则映射 file_status
+    if pr:
+        display_status = pr.status
+    elif file.file_status == "verified":
+        display_status = "idle"
+    else:
+        display_status = file.file_status
+    
+    return {
+        "id": file.id,
+        "filename": file.filename,
+        "deviceType": dm.device_type if dm else "Watch",
+        "deviceModel": dm.device_model if dm else "Unknown",
+        "deviceName": file.device_name or None,
+        "status": display_status,
+        "size": file.size,
+        "duration": pr.duration if pr else "--",
+        "testTypeL1": file.test_type_l1,
+        "testTypeL2": file.test_type_l2,
+        "notes": file.notes,
+        "uploadTime": file.upload_time,
+        "packets": json.loads(pr.packets) if pr and pr.packets and pr.packets != "[]" else [],
+        "errorMessage": pr.error_message if pr else None,
+        "progress": pr.progress if pr else None,
+        "contentMeta": pr.content_meta if pr else None,
+        "processedDir": pr.processed_dir if pr else None,
+        "nameSuffix": file.name_suffix or None,
+        "startTime": file.start_time or None,
+        "collectionTime": file.collection_time or None,
+        "timezone": file.timezone or None,
+        "deviceMac": file.device_mac or None,
+        "deviceVersion": file.device_version or None,
+        "userName": file.user_name or None,
+    }
 
 
 @router.get("/stats", response_model=api_models.StatsResponse)
@@ -67,8 +123,12 @@ def get_files(
     try:
         skip = (page - 1) * limit
         files, total = crud.get_files(session, skip, limit, search, device, status, sort)
+        
+        # 使用 _build_file_response 展平每个文件
+        items = [_build_file_response(session, f) for f in files]
+        
         return {
-            "items": files,
+            "items": items,
             "total": total,
             "page": page,
             "limit": limit,
@@ -181,11 +241,14 @@ async def upload_file(
          exact_match = crud.get_exact_match_file(session, md5, filename)
          if exact_match:
              logger.info(f"Exact match found for {filename} ({md5}). Skipping creation.")
+             # 获取展平状态
+             exact_pr = parse_result_crud.get_by_file_id(session, exact_match.id)
+             display_status = exact_pr.status if exact_pr else exact_match.file_status
              return {
                  "code": 200,
                  "data": {
                      "file_id": exact_match.id,
-                     "status": exact_match.status,
+                     "status": display_status,
                      "saved_path": str(expected_raw_path),
                      "is_duplicate": True
                  },
@@ -194,9 +257,9 @@ async def upload_file(
 
          # 检查解析状态 (Smart Status)
          processed_dir = StorageService.get_processed_dir(md5)
-         initial_status = "idle"
+         initial_parse_status = "idle"
          if processed_dir.exists() and any(processed_dir.iterdir()):
-             initial_status = "processed"
+             initial_parse_status = "processed"
          
          # 创建新的 SensorFile (指向同一个 Hash, 但文件名不同)
          file_id = str(uuid.uuid4())
@@ -214,33 +277,33 @@ async def upload_file(
          else:
              size_str = f"{original_size / (1024 * 1024 * 1024):.1f} GB"
          
+         # 尝试从已有的 SensorFile 兄弟记录获取 device_name
+         existing_sibling = crud.get_file_by_hash(session, md5)
+         sibling_device_name = existing_sibling.device_name if existing_sibling else ""
+         
          new_sf = SensorFile(
              id=file_id,
              file_hash=md5,
-             filename=filename, # 使用新上传的文件名
-             deviceType=deviceType,
-             deviceModel="Unknown",
+             filename=filename,
              size=size_str,
-             file_size_bytes=original_size, # 保存 Int 大小
+             file_size_bytes=original_size,
              name_suffix=name_suffix,
-             uploadTime=datetime.utcnow().isoformat(),
-             status=initial_status,
-             processedDir=str(processed_dir)
+             upload_time=datetime.now(timezone.utc).isoformat(),
+             file_status="verified",  # Dedup means already verified
          )
          
-         # 解析元数据 (去重情况下的可选覆盖? 
-         # 需求说明 "前端文件入口也需要解析". 
-         # 如果找到严格的精确匹配, 我们跳过返回.
-         # 但在这里, 我们正在创建一个指向旧物理文件的新 SensorFile.
-         # 所以我们 应该 解析新的文件名元数据.
+         # 解析文件名元数据
          meta = parse_filename(filename)
          new_sf.test_type_l1 = meta.get("test_type_l1", "Unknown")
          new_sf.test_type_l2 = meta.get("test_type_l2", "--")
          new_sf.tester = meta.get("tester", "")
          new_sf.mac = meta.get("mac", "")
          new_sf.collection_time = meta.get("collection_time", "")
-         if meta.get("deviceType"):
-             new_sf.device_type = meta.get("deviceType")
+         
+         # 从兄弟记录继承 device_name
+         device_name_val = sibling_device_name or ""
+         if device_name_val:
+             new_sf.device_name = device_name_val
          
          # Auto-Insert Dictionary
          if meta.get("test_type_l1"):
@@ -248,11 +311,24 @@ async def upload_file(
 
          crud.create_file(session, new_sf)
          
+         # 创建 ParseResult
+         resolved = device_mapping_crud.resolve_device_info(session, device_name_val)
+         
+         # 如果兄弟有 ParseResult, 复制 content_meta
+         sibling_pr = parse_result_crud.get_by_file_id(session, existing_sibling.id) if existing_sibling else None
+         
+         parse_result_crud.create_or_update(session, file_id, {
+             "status": initial_parse_status,
+             "device_type_used": resolved["device_type"],
+             "content_meta": sibling_pr.content_meta if sibling_pr else None,
+             "processed_dir": str(processed_dir),
+         })
+         
          return {
              "code": 200,
              "data": {
                  "file_id": file_id,
-                 "status": initial_status,
+                 "status": initial_parse_status,
                  "saved_path": str(expected_raw_path)
              },
              "message": "🎉 秒传成功！(File exists)"
@@ -302,31 +378,29 @@ async def upload_file(
             id=file_id,
             file_hash=md5,
             filename=filename,
-            deviceType=deviceType,
-            deviceModel="Unknown",
             size=size_str,
-            file_size_bytes=original_size, # 保存 Int 大小 
+            file_size_bytes=original_size,
             # 记录上传者
             uploaded_by=current_user.get("username", "Unknown"),
             name_suffix=name_suffix,
-            uploadTime=datetime.utcnow().isoformat(),
-            status="unverified",
-            processedDir=str(StorageService.get_processed_dir(md5)) # 使用 Hash
+            upload_time=datetime.now(timezone.utc).isoformat(),
+            file_status="unverified",
         )
         
-        # Parse Metadata
+        # Parse Metadata from filename
         meta = parse_filename(filename)
         new_sf.test_type_l1 = meta.get("test_type_l1", "Unknown")
         new_sf.test_type_l2 = meta.get("test_type_l2", "--")
         new_sf.tester = meta.get("tester", "")
         new_sf.mac = meta.get("mac", "")
         new_sf.collection_time = meta.get("collection_time", "")
-        if meta.get("deviceType"):
-             new_sf.device_type = meta.get("deviceType")
 
         # Auto-Insert Dictionary
         if meta.get("test_type_l1"):
              ensure_test_types_exist(session, meta.get("test_type_l1"), meta.get("test_type_l2"))
+        
+        # Note: device_name, device_type, content_meta will be resolved in verify_upload_task
+        # which creates the ParseResult after metadata extraction.
 
         crud.create_file(session, new_sf)
         
@@ -354,24 +428,78 @@ def update_file(
     file_id: str,
     update: api_models.FileUpdateRequest,
     session: Session = Depends(deps.get_db)
-) -> SensorFile:
+) -> dict:
     """
-    更新文件信息;
+    更新文件信息 (notes, device_name, test_type, device_type, device_model 等);
+    
+    device_type / device_model 会代理到 DeviceMapping 表;
+    如果 device_type 变更, 关联 ParseResult 会重置为 idle;
 
     Args:
         file_id: 文件 ID;
         update: 要更新的字段;
 
     Returns:
-        SensorFile: 更新后的文件对象;
+        dict: 更新后的文件展平响应;
 
     Raises:
         HTTPException: 文件不存在时抛出 404 错误;
     """
-    updated = crud.update_file(session, file_id, update.model_dump(exclude_unset=True))
-    if not updated:
+    update_data = update.model_dump(exclude_unset=True)
+    
+    # 先获取文件当前状态
+    file_obj = crud.get_file(session, file_id)
+    if not file_obj:
         raise HTTPException(status_code=404, detail="File not found")
-    return updated
+    
+    # 提取 device_type / device_model (代理到 DeviceMapping)
+    new_device_type = update_data.pop("device_type", None)
+    new_device_model = update_data.pop("device_model", None)
+    
+    # 更新 SensorFile 字段 (notes, device_name, test_type_l1, test_type_l2)
+    if update_data:
+        updated = crud.update_file(session, file_id, update_data)
+    else:
+        updated = file_obj
+    
+    # 代理设备类型/型号到 DeviceMapping
+    if new_device_type or new_device_model:
+        device_name = updated.device_name
+        if device_name:
+            from app.crud import device_mapping as dm_crud
+            existing_mapping = dm_crud.get_device_mapping(session, device_name)
+            if existing_mapping:
+                # 更新现有映射
+                dm_updates = {}
+                if new_device_type:
+                    dm_updates["device_type"] = new_device_type
+                if new_device_model:
+                    dm_updates["device_model"] = new_device_model
+                old_type = existing_mapping.device_type
+                dm_crud.update_device_mapping(session, device_name, dm_updates)
+                # 级联更新 (含 processed → idle 逻辑)
+                dm_crud.cascade_mapping_to_files(
+                    session, device_name,
+                    new_device_type or existing_mapping.device_type,
+                    new_device_model or existing_mapping.device_model,
+                    old_device_type=old_type
+                )
+            else:
+                # 创建新映射
+                from app.models.device_mapping import DeviceMapping as DM
+                new_mapping = DM(
+                    device_name=device_name,
+                    device_type=new_device_type or "Watch",
+                    device_model=new_device_model or "Unknown"
+                )
+                dm_crud.create_device_mapping(session, new_mapping)
+                dm_crud.cascade_mapping_to_files(
+                    session, device_name,
+                    new_mapping.device_type,
+                    new_mapping.device_model
+                )
+    
+    return _build_file_response(session, updated)
 
 
 @router.delete("/files/{file_id}")
@@ -426,7 +554,7 @@ def share_file(
         
     # Create Token
     token = str(uuid.uuid4()).replace("-", "") + str(uuid.uuid4()).replace("-", "")
-    expire_at = datetime.utcnow() + timedelta(days=days)
+    expire_at = datetime.now(timezone.utc) + timedelta(days=days)
     
     link = SharedLink(
         token=token,
@@ -458,7 +586,7 @@ def get_public_file(
     if not link:
         raise HTTPException(404, "Invalid or expired link")
         
-    if link.expire_at < datetime.utcnow():
+    if link.expire_at < datetime.now(timezone.utc):
         raise HTTPException(403, "Link expired")
         
     # 2. Get File
@@ -468,15 +596,17 @@ def get_public_file(
          
     # 3. Return Data (Sanitized)
     # Return structure similar to what frontend expects for loading
+    # 展平返回
+    pr = parse_result_crud.get_by_file_id(session, file.id)
     return {
         "id": file.id,
         "file_hash": file.file_hash,
         "filename": file.filename,
         "size": file.size,
         "uploadTime": file.upload_time,
-        "status": file.status,
-        "processedDir": file.processed_dir,
-        "contentMeta": file.content_meta,
+        "status": pr.status if pr else file.file_status,
+        "processedDir": pr.processed_dir if pr else None,
+        "contentMeta": pr.content_meta if pr else None,
         "token_valid": True
     }
 
@@ -498,11 +628,12 @@ def get_structure(file_id: str, session: Session = Depends(deps.get_db)) -> dict
     file = crud.get_file(session, file_id)
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
+    pr = parse_result_crud.get_by_file_id(session, file.id)
     return {
         "fileId": file.id,
-        "status": file.status,
-        "processedDir": file.processed_dir,
-        "contentMeta": file.content_meta or {}
+        "status": pr.status if pr else file.file_status,
+        "processedDir": pr.processed_dir if pr else None,
+        "contentMeta": pr.content_meta if pr else {}
     }
 
 
@@ -613,51 +744,6 @@ def download_file(file_id: str, session: Session = Depends(deps.get_db)):
     )
 
 
-@router.post("/files/batch-download")
-def batch_download(
-    request: api_models.BatchDownloadRequest,
-    session: Session = Depends(deps.get_db)
-):
-    """
-    批量下载文件 (Zip包);
-    返回一个包含多个 .raw.zst 文件的 Zip 包.
-
-    Args:
-        request: 包含要下载的文件 ID 列表;
-
-    Returns:
-        FileResponse: 临时 Zip 文件;
-    """
-    import tempfile
-    import zipfile
-    from fastapi.responses import FileResponse
-    
-    # 1. 获取所有请求的文件信息
-    files_to_download = []
-    for fid in request.ids:
-        file = crud.get_file(session, fid)
-        if file:
-            files_to_download.append(file)
-            
-    if not files_to_download:
-        raise HTTPException(400, "No valid files found")
-        
-    try:
-        # 2. 使用 FileService 创建 Zip
-        zip_path = FileService.create_batch_zip(files_to_download)
-        
-        # 3. 返回响应
-        return FileResponse(
-            path=zip_path,
-            filename=f"sensorhub_batch_{datetime.now().strftime('%Y%m%d%H%M%S')}.zip",
-            media_type="application/zip",
-            background=BackgroundTask(lambda p: Path(p).unlink(missing_ok=True), zip_path)
-        )
-        
-    except Exception as e:
-        logger.error(f"Batch download error: {e}")
-        raise HTTPException(500, f"Batch download failed: {str(e)}")
-
 
 @router.post("/files/{file_id}/parse")
 def trigger_parse(
@@ -682,8 +768,14 @@ def trigger_parse(
     if not file:
         raise HTTPException(404, "File not found")
 
-    # 直接设置状态为已处理
-    crud.update_file(session, file_id, {"status": "Processed"})
+    # 获取当前 device_type 快照
+    resolved = device_mapping_crud.resolve_device_info(session, file.device_name)
+    
+    # 更新 ParseResult 状态
+    parse_result_crud.create_or_update(session, file_id, {
+        "status": "processed",
+        "device_type_used": resolved["device_type"],
+    })
 
     return {"status": "Processed", "message": "Parse completed"}
 

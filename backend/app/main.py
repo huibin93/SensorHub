@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1.endpoints import files, dictionaries, devices, users
+from app.api.v1.endpoints import files, dictionaries, devices, users, device_mappings
 from app.core.config import settings
 from app.core.database import init_db
 
@@ -41,6 +41,7 @@ app.include_router(dictionaries.router, prefix=f"{settings.API_V1_STR}", tags=["
 app.include_router(files.router, prefix=f"{settings.API_V1_STR}", tags=["files"])
 app.include_router(devices.router, prefix=f"{settings.API_V1_STR}", tags=["devices"])
 app.include_router(users.router, prefix=f"{settings.API_V1_STR}/users", tags=["users"])
+app.include_router(device_mappings.router, prefix=f"{settings.API_V1_STR}/device-mappings", tags=["device-mappings"])
 
 from app.api.v1.endpoints import auth, log_parser
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}", tags=["auth"])

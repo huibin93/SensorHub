@@ -25,33 +25,39 @@ class SensorFileResponse(BaseModel):
     """
     传感器文件响应模型;
 
-    用于 API 返回文件信息,支持从数据库模型自动转换;
+    用于 API 返回文件信息;
+    通过 JOIN DeviceMapping 和 ParseResult 展平返回，保持前端兼容;
     """
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: str
     filename: str
-    deviceType: str = Field(validation_alias="device_type")
-    status: str
+    deviceType: str = Field(default="Watch")  # ← JOIN DeviceMapping
+    status: str = Field(default="unverified")  # ← 合并 file_status / ParseResult.status
     size: str
-    duration: str
-    deviceModel: str = Field(validation_alias="device_model")
-    testTypeL1: str = Field(validation_alias="test_type_l1")
-    testTypeL2: str = Field(validation_alias="test_type_l2")
-    notes: str
+    duration: str = Field(default="--")  # ← ParseResult
+    deviceModel: str = Field(default="Unknown")  # ← JOIN DeviceMapping
+    testTypeL1: str = Field(default="Unknown", validation_alias="test_type_l1")
+    testTypeL2: str = Field(default="--", validation_alias="test_type_l2")
+    notes: str = Field(default="")
     uploadTime: str = Field(validation_alias="upload_time")
-    packets: Any  # 数据库存储为字符串,前端期望数组
+    packets: Any = Field(default="[]")  # ← ParseResult
 
-    errorMessage: Optional[str] = Field(None, validation_alias="error_message")
-    progress: Optional[int] = None
-    contentMeta: Optional[dict] = Field(None, validation_alias="content_meta")
+    errorMessage: Optional[str] = Field(None)  # ← ParseResult
+    progress: Optional[int] = None  # ← ParseResult
+    contentMeta: Optional[dict] = Field(None)  # ← ParseResult
     rawPath: Optional[str] = Field(None, validation_alias="raw_path")
-    progress: Optional[int] = None
-    contentMeta: Optional[dict] = Field(None, validation_alias="content_meta")
-    rawPath: Optional[str] = Field(None, validation_alias="raw_path")
-    processedDir: Optional[str] = Field(None, validation_alias="processed_dir")
-    
+    processedDir: Optional[str] = Field(None)  # ← ParseResult
     nameSuffix: Optional[str] = Field(None, validation_alias="name_suffix")
+    
+    # Metadata fields (2026-02-04)
+    deviceName: Optional[str] = Field(None, validation_alias="device_name")
+    startTime: Optional[str] = Field(None, validation_alias="start_time")
+    collectionTime: Optional[str] = Field(None, validation_alias="collection_time")
+    timezone: Optional[str] = Field(None, validation_alias="timezone")
+    deviceMac: Optional[str] = Field(None, validation_alias="device_mac")
+    deviceVersion: Optional[str] = Field(None, validation_alias="device_version")
+    userName: Optional[str] = Field(None, validation_alias="user_name")
 
 
 class PaginatedFilesResponse(BaseModel):
@@ -66,10 +72,11 @@ class PaginatedFilesResponse(BaseModel):
 class FileUpdateRequest(BaseModel):
     """文件更新请求模型;"""
     notes: Optional[str] = None
-    deviceType: Optional[str] = None
-    deviceModel: Optional[str] = None
-    testTypeL1: Optional[str] = None
-    testTypeL2: Optional[str] = None
+    device_name: Optional[str] = Field(None, validation_alias="deviceName")
+    device_type: Optional[str] = Field(None, validation_alias="deviceType")
+    device_model: Optional[str] = Field(None, validation_alias="deviceModel")
+    test_type_l1: Optional[str] = Field(None, validation_alias="testTypeL1")
+    test_type_l2: Optional[str] = Field(None, validation_alias="testTypeL2")
 
 
 class BatchDeleteRequest(BaseModel):
@@ -90,11 +97,6 @@ class ParseRequest(BaseModel):
     options: Optional[dict] = None
 
 
-class BatchDownloadRequest(BaseModel):
-    """批量下载请求模型;"""
-    ids: List[str]
-
-
 # --- 配置/字典相关 ---
 
 class DeviceType(BaseModel):
@@ -106,12 +108,6 @@ class DeviceType(BaseModel):
 class DevicesResponse(BaseModel):
     """设备列表响应模型;"""
     devices: List[DeviceType]
-
-
-class AddDeviceModelRequest(BaseModel):
-    """添加设备型号请求模型;"""
-    deviceType: str
-    modelName: str
 
 
 class TestType(BaseModel):
