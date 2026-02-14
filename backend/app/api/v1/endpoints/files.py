@@ -4,9 +4,11 @@
 本模块提供传感器文件的 CRUD 操作、上传、下载、解析等 API 端点;
 """
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Header, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pathlib import Path
 from sqlmodel import Session
 from typing import List, Optional, Any
+import asyncio
 import uuid
 import json
 from datetime import datetime, timedelta, timezone
@@ -17,7 +19,8 @@ from app.crud import file as crud
 from app.crud import device_mapping as device_mapping_crud
 from app.crud import parse_result as parse_result_crud
 from app.services.storage import StorageService
-from app.services.parser import ParserService
+from app.services.parser_v2 import ParserServiceV2
+from app.services.parse_progress import parse_progress
 from app.services.metadata import parse_filename, ensure_test_types_exist
 from app.services.file_service import FileService
 from app.models.sensor_file import SensorFile, PhysicalFile
@@ -57,7 +60,10 @@ def _build_file_response(session: Session, file: SensorFile) -> dict:
     else:
         display_status = file.file_status
     
-    return {
+    from app.core.logger import logger
+    progress_info = parse_progress.get(file.id)
+    current_progress = progress_info.get("progress") if isinstance(progress_info, dict) else (pr.progress if pr else None)
+    res = {
         "id": file.id,
         "filename": file.filename,
         "deviceType": dm.device_type if dm else "Watch",
@@ -72,7 +78,7 @@ def _build_file_response(session: Session, file: SensorFile) -> dict:
         "uploadTime": file.upload_time,
         "packets": json.loads(pr.packets) if pr and pr.packets and pr.packets != "[]" else [],
         "errorMessage": pr.error_message if pr else None,
-        "progress": pr.progress if pr else None,
+        "progress": current_progress,
         "contentMeta": pr.content_meta if pr else None,
         "processedDir": pr.processed_dir if pr else None,
         "nameSuffix": file.name_suffix or None,
@@ -83,6 +89,9 @@ def _build_file_response(session: Session, file: SensorFile) -> dict:
         "deviceVersion": file.device_version or None,
         "userName": file.user_name or None,
     }
+    logger.info(f"[API] _build_file_response: {file.id} -> {display_status} (pr_exists={pr is not None})")
+    logger.debug(f"DEBUG: File {file.id} status: {display_status}")
+    return res
 
 
 @router.get("/stats", response_model=api_models.StatsResponse)
@@ -93,7 +102,7 @@ def get_stats(session: Session = Depends(deps.get_db)) -> api_models.StatsRespon
     Returns:
         StatsResponse: 包含文件总数、今日上传数等统计信息;
     """
-    return crud.get_stats(session)
+    return api_models.StatsResponse(**crud.get_stats(session))
 
 
 @router.get("/files", response_model=api_models.PaginatedFilesResponse)
@@ -125,15 +134,18 @@ def get_files(
         files, total = crud.get_files(session, skip, limit, search, device, status, sort)
         
         # 使用 _build_file_response 展平每个文件
-        items = [_build_file_response(session, f) for f in files]
+        items = [
+            api_models.SensorFileResponse.model_validate(_build_file_response(session, f))
+            for f in files
+        ]
         
-        return {
-            "items": items,
-            "total": total,
-            "page": page,
-            "limit": limit,
-            "totalPages": (total + limit - 1) // limit if limit > 0 else 1
-        }
+        return api_models.PaginatedFilesResponse(
+            items=items,
+            total=total,
+            page=page,
+            limit=limit,
+            totalPages=(total + limit - 1) // limit if limit > 0 else 1,
+        )
     except Exception as e:
         import traceback
         logger.error(f"Error in get_files: {e}\n{traceback.format_exc()}")
@@ -250,7 +262,8 @@ async def upload_file(
                      "file_id": exact_match.id,
                      "status": display_status,
                      "saved_path": str(expected_raw_path),
-                     "is_duplicate": True
+                     "is_duplicate": True,
+                     "file": _build_file_response(session, exact_match)
                  },
                  "message": "文件已存在 (无需重复上传)"
              }
@@ -287,15 +300,17 @@ async def upload_file(
              filename=filename,
              size=size_str,
              file_size_bytes=original_size,
-             name_suffix=name_suffix,
-             upload_time=datetime.now(timezone.utc).isoformat(),
+             nameSuffix=name_suffix,
+             uploadTime=datetime.now(timezone.utc).isoformat(),
              file_status="verified",  # Dedup means already verified
          )
          
          # 解析文件名元数据
          meta = parse_filename(filename)
-         new_sf.test_type_l1 = meta.get("test_type_l1", "Unknown")
-         new_sf.test_type_l2 = meta.get("test_type_l2", "--")
+         test_type_l1 = str(meta.get("test_type_l1") or "Unknown")
+         test_type_l2 = str(meta.get("test_type_l2") or "--")
+         new_sf.test_type_l1 = test_type_l1
+         new_sf.test_type_l2 = test_type_l2
          new_sf.tester = meta.get("tester", "")
          new_sf.mac = meta.get("mac", "")
          new_sf.collection_time = meta.get("collection_time", "")
@@ -306,8 +321,8 @@ async def upload_file(
              new_sf.device_name = device_name_val
          
          # Auto-Insert Dictionary
-         if meta.get("test_type_l1"):
-             ensure_test_types_exist(session, meta.get("test_type_l1"), meta.get("test_type_l2"))
+         if test_type_l1 and test_type_l1 != "Unknown":
+             ensure_test_types_exist(session, test_type_l1, test_type_l2)
 
          crud.create_file(session, new_sf)
          
@@ -329,7 +344,8 @@ async def upload_file(
              "data": {
                  "file_id": file_id,
                  "status": initial_parse_status,
-                 "saved_path": str(expected_raw_path)
+                 "saved_path": str(expected_raw_path),
+                 "file": _build_file_response(session, new_sf)
              },
              "message": "🎉 秒传成功！(File exists)"
          }
@@ -382,22 +398,24 @@ async def upload_file(
             file_size_bytes=original_size,
             # 记录上传者
             uploaded_by=current_user.get("username", "Unknown"),
-            name_suffix=name_suffix,
-            upload_time=datetime.now(timezone.utc).isoformat(),
+            nameSuffix=name_suffix,
+            uploadTime=datetime.now(timezone.utc).isoformat(),
             file_status="unverified",
         )
         
         # Parse Metadata from filename
         meta = parse_filename(filename)
-        new_sf.test_type_l1 = meta.get("test_type_l1", "Unknown")
-        new_sf.test_type_l2 = meta.get("test_type_l2", "--")
+        test_type_l1 = str(meta.get("test_type_l1") or "Unknown")
+        test_type_l2 = str(meta.get("test_type_l2") or "--")
+        new_sf.test_type_l1 = test_type_l1
+        new_sf.test_type_l2 = test_type_l2
         new_sf.tester = meta.get("tester", "")
         new_sf.mac = meta.get("mac", "")
         new_sf.collection_time = meta.get("collection_time", "")
 
         # Auto-Insert Dictionary
-        if meta.get("test_type_l1"):
-             ensure_test_types_exist(session, meta.get("test_type_l1"), meta.get("test_type_l2"))
+        if test_type_l1 and test_type_l1 != "Unknown":
+            ensure_test_types_exist(session, test_type_l1, test_type_l2)
         
         # Note: device_name, device_type, content_meta will be resolved in verify_upload_task
         # which creates the ParseResult after metadata extraction.
@@ -412,7 +430,8 @@ async def upload_file(
             "data": {
                 "file_id": file_id,
                 "status": "unverified",
-                "saved_path": saved_path
+                "saved_path": saved_path,
+                "file": _build_file_response(session, new_sf)
             },
             "message": "文件上传成功,正在校验..."
         }
@@ -461,6 +480,9 @@ def update_file(
         updated = crud.update_file(session, file_id, update_data)
     else:
         updated = file_obj
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="File not found")
     
     # 代理设备类型/型号到 DeviceMapping
     if new_device_type or new_device_model:
@@ -748,36 +770,149 @@ def download_file(file_id: str, session: Session = Depends(deps.get_db)):
 @router.post("/files/{file_id}/parse")
 def trigger_parse(
     file_id: str,
-    request: api_models.ParseRequest,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(deps.get_db)
 ) -> dict:
     """
-    触发文件解析;
+    触发文件解析 (后台异步);
 
     Args:
         file_id: 文件 ID;
-        request: 解析选项;
+        background_tasks: FastAPI 后台任务;
 
     Returns:
         dict: 解析状态;
 
     Raises:
-        HTTPException: 文件不存在时抛出 404 错误;
+        HTTPException: 文件不存在(404), 文件未校验(400);
     """
+    logger.debug(f"DEBUG: trigger_parse called for file_id={file_id}")
+    logger.info(f"API trigger_parse called with file_id={file_id}")
+    file = crud.get_file(session, file_id)
+    if not file:
+        logger.debug(f"DEBUG: File {file_id} NOT FOUND in DB")
+        raise HTTPException(404, "File not found")
+
+    if file.file_status != "verified":
+        raise HTTPException(400, f"File not verified yet (status={file.file_status})")
+
+    # 获取当前 device_type 快照
+    resolved = device_mapping_crud.resolve_device_info(session, file.device_name)
+
+    # 后台异步解析
+    logger.debug(f"DEBUG: Adding background task for {file_id}")
+    background_tasks.add_task(
+        ParserServiceV2.parse_file_task,
+        file_id,
+        file.file_hash,
+        resolved["device_type"],
+    )
+
+    return {"status": "processing", "message": "Parse started in background"}
+
+
+@router.get("/files/{file_id}/parse-events")
+async def parse_events(file_id: str):
+    """
+    SSE 端点: 实时推送解析进度;
+
+    前端通过 EventSource 订阅, 接收 progress/status 更新;
+    连接保持直到解析完成(processed/error)或超时;
+
+    Args:
+        file_id: SensorFile ID;
+
+    Returns:
+        StreamingResponse: text/event-stream;
+    """
+    logger.info(f"[SSE] Client subscribed to parse events for {file_id}")
+
+    async def event_generator():
+        async for state in parse_progress.subscribe(file_id):
+            data = json.dumps({
+                "progress": state["progress"],
+                "status": state["status"],
+            })
+            yield f"data: {data}\n\n"
+            logger.debug(f"[SSE] Sent to {file_id}: {data}")
+        # 发送结束事件
+        yield f"event: done\ndata: {{}}\n\n"
+        logger.info(f"[SSE] Stream ended for {file_id}")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/files/{file_id}/download-parsed")
+def download_parsed_data(
+    file_id: str,
+    session: Session = Depends(deps.get_db)
+):
+    """
+    下载解析后的 Parquet 数据包 (ZIP);
+
+    将 storage/processed/{hash}/ 下所有文件打包为 ZIP 流式返回;
+
+    Args:
+        file_id: 文件 ID;
+
+    Returns:
+        StreamingResponse: ZIP 文件流;
+
+    Raises:
+        HTTPException: 文件不存在(404), 未解析(400), 目录不存在(404);
+    """
+    import zipfile
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+
     file = crud.get_file(session, file_id)
     if not file:
         raise HTTPException(404, "File not found")
 
-    # 获取当前 device_type 快照
-    resolved = device_mapping_crud.resolve_device_info(session, file.device_name)
-    
-    # 更新 ParseResult 状态
-    parse_result_crud.create_or_update(session, file_id, {
-        "status": "processed",
-        "device_type_used": resolved["device_type"],
-    })
+    # 检查解析状态
+    pr = parse_result_crud.get_by_file_id(session, file_id)
+    if not pr or pr.status != "processed":
+        raise HTTPException(400, "File not parsed yet")
 
-    return {"status": "Processed", "message": "Parse completed"}
+    processed_dir = StorageService.get_processed_dir(file.file_hash)
+    if not processed_dir.exists():
+        raise HTTPException(404, "Processed data directory not found")
+
+    # 收集目录下所有文件
+    files_to_zip = list(processed_dir.iterdir())
+    if not files_to_zip:
+        raise HTTPException(404, "No parsed files found")
+
+    # 创建 ZIP 到内存
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files_to_zip:
+            if f.is_file():
+                zf.write(f, f.name)
+    buffer.seek(0)
+
+    # 构造下载文件名
+    stem = file.filename
+    if stem.lower().endswith(".rawdata"):
+        stem = stem[:-8]
+    download_name = f"{stem}_parsed.zip"
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_name}"',
+            "Content-Length": str(buffer.getbuffer().nbytes),
+        }
+    )
 
 
 @router.get("/files/{file_id}/content")

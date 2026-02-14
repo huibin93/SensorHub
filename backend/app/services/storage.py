@@ -89,60 +89,195 @@ class StorageService:
         }
 
     @staticmethod
-    def verify_integrity(file_path: Path, expected_md5: str) -> bool:
+    def verify_and_rebuild_index(file_path: Path, expected_md5: str, existing_index: Dict = None) -> Dict[str, Any]:
         """
-        校验文件完整性: 解压 Zstd 流并计算 MD5;
+        校验文件完整性，并按需重建帧索引 (Frame Index);
+        
+        策略:
+        1. 全量解压读取，计算真实 MD5。
+        2. 同时进行重压缩 (Re-compression)，生成标准化的帧索引 (2MB Chunk, Line Aligned)。
+        3. 如果源文件 MD5 匹配但索引缺失/无效，用新生成的临时文件替换源文件 (或仅更新索引，视情况而定)。
+           为简化逻辑，若决定重建，统一用新文件替换旧文件，确保 Data 与 Index 绝对一致。
         
         Args:
             file_path: Zstd 文件路径;
-            expected_md5: 期望的原始数据 MD5;
+            expected_md5: 期望的原始数据 MD5 (必填);
+            existing_index: 数据库中已有的索引 (可选,用于参考);
             
         Returns:
-            bool: 是否匹配;
+            Dict: {
+                "valid": bool,           # MD5 是否匹配
+                "rebuilt": bool,         # 是否发生了重建/替换
+                "frame_index": dict,     # 最终有效的帧索引 (原样或新建)
+                "file_size_bytes": int   # 解压后的实际大小
+            }
         """
         import zstandard as zstd
         import hashlib
+        import os
         
         if not file_path.exists():
             logger.error(f"File not found for verification: {file_path}")
-            return False
-            
-        logger.info(f"Verifying integrity for {file_path} ...")
+            return {"valid": False, "rebuilt": False, "frame_index": None, "file_size_bytes": 0}
+
+        logger.info(f"Verifying and potentially rebuilding {file_path} (Expected MD5: {expected_md5})")
+        
+        # 1. 准备重建环境
+        temp_path = file_path.with_name(f"rebuild_{uuid.uuid4()}.zst")
         
         dctx = zstd.ZstdDecompressor()
+        cctx = zstd.ZstdCompressor(level=6)
+        
         hasher = hashlib.md5()
         
+        # 重建状态
+        new_frame_index_list = []
+        raw_buffer = bytearray()
+        
+        MIN_CHUNK_SIZE = 2 * 1024 * 1024  # 2MB
+        MAX_CHUNK_SIZE = 4 * 1024 * 1024  # 4MB
+        
+        offset = 0          # 解压数据累计偏移
+        upload_offset = 0   # 压缩文件累计偏移 (新文件)
+        
         try:
-            with file_path.open('rb') as ifh:
-                 with dctx.stream_reader(ifh) as reader:
-                    first_chunk = True
+            with file_path.open('rb') as ifh, temp_path.open('wb') as ofh:
+                with dctx.stream_reader(ifh) as reader:
                     while True:
-                        chunk = reader.read(65536) # 64KB
+                        # 每次读取 64KB 解压数据
+                        chunk = reader.read(64 * 1024)
                         if not chunk:
                             break
                         
-                        # 基本魔术数字检查 (拒绝将 PDF 重命名为原始数据)
-                        if first_chunk:
-                            if chunk.startswith(b'%PDF'):
-                                logger.error(f"File {file_path} rejected: PDF signature detected.")
-                                return False
-                            first_chunk = False
-
                         hasher.update(chunk)
-            
-            calculated = hasher.hexdigest()
-            match = (calculated == expected_md5)
-            
-            if match:
-                logger.info(f"Verification PASSED for {file_path}")
-            else:
-                logger.error(f"Verification FAILED for {file_path}. Expected {expected_md5}, got {calculated}")
+                        raw_buffer.extend(chunk)
+                        
+                        # 处理缓冲区: 切分帧
+                        while len(raw_buffer) >= MAX_CHUNK_SIZE:
+                            # 寻找换行符
+                            search_start = MIN_CHUNK_SIZE
+                            search_end = MAX_CHUNK_SIZE
+                            
+                            newline_pos = raw_buffer.find(b'\n', search_start, search_end)
+                            
+                            cut_pos = 0
+                            ends_with_newline = False
+                            
+                            if newline_pos != -1:
+                                cut_pos = newline_pos + 1
+                                ends_with_newline = True
+                            else:
+                                cut_pos = MAX_CHUNK_SIZE
+                                if raw_buffer[cut_pos-1] == 10:
+                                    ends_with_newline = True
+                            
+                            # 切分并压缩
+                            chunk_data = raw_buffer[:cut_pos]
+                            del raw_buffer[:cut_pos]
+                            
+                            compressed = cctx.compress(chunk_data)
+                            ofh.write(compressed)
+                            
+                            c_len = len(compressed)
+                            d_len = len(chunk_data)
+                            
+                            new_frame_index_list.append({
+                                "cs": upload_offset,
+                                "cl": c_len,
+                                "ds": offset,
+                                "dl": d_len,
+                                "nl": ends_with_newline
+                            })
+                            
+                            upload_offset += c_len
+                            offset += d_len
                 
-            return match
+                # 处理剩余数据
+                while raw_buffer:
+                    cut_pos = min(len(raw_buffer), MAX_CHUNK_SIZE)
+                    if len(raw_buffer) >= MIN_CHUNK_SIZE:
+                        limit = min(len(raw_buffer), MAX_CHUNK_SIZE)
+                        nl = raw_buffer.find(b'\n', MIN_CHUNK_SIZE, limit)
+                        if nl != -1:
+                            cut_pos = nl + 1
+                    
+                    ends_with_newline = False
+                    if cut_pos > 0 and raw_buffer[cut_pos-1] == 10:
+                        ends_with_newline = True
+                        
+                    chunk_data = raw_buffer[:cut_pos]
+                    del raw_buffer[:cut_pos]
+                    
+                    compressed = cctx.compress(chunk_data)
+                    ofh.write(compressed)
+                    
+                    c_len = len(compressed)
+                    d_len = len(chunk_data)
+                    
+                    new_frame_index_list.append({
+                        "cs": upload_offset,
+                        "cl": c_len,
+                        "ds": offset,
+                        "dl": d_len,
+                        "nl": ends_with_newline
+                    })
+                    upload_offset += c_len
+                    offset += d_len
+
+            # 计算最终 MD5
+            calculated_md5 = hasher.hexdigest()
+            total_size_bytes = offset
             
+            if calculated_md5 != expected_md5:
+                logger.error(f"Integrity check failed! Expected {expected_md5}, got {calculated_md5}")
+                if temp_path.exists():
+                    os.remove(temp_path)
+                return {"valid": False, "rebuilt": False, "frame_index": None, "file_size_bytes": 0}
+            
+            # MD5 正确。构建完整 Frame Index 对象
+            complete_new_index = {
+                "version": 2,
+                "frameSize": MIN_CHUNK_SIZE,
+                "maxFrameSize": MAX_CHUNK_SIZE,
+                "lineAligned": True,
+                "originalSize": total_size_bytes,
+                "compressedSize": upload_offset,
+                "frames": new_frame_index_list
+            }
+            
+            # 决策: 是否替换原文件?
+            # 如果原文件没有 index, 或者原文件的 index 在逻辑上看起来不对 (简单判断 version/originalSize),
+            # 或者我们为了统一标准, 只要重新跑了就替换?
+            # 策略: Always Replace. 这样保证了磁盘上的 .zst 结构与我们生成的 index 100% 匹配.
+            # 尤其是前端上传的 zst 可能压缩等级不同, 或者分块不同.
+            
+            logger.info(f"Rebuild success. Replacing original file {file_path} with standardized zst.")
+            
+            # Windows 上 rename 需要先 remove 目标 (或者用 replace)
+            # shutil.move or os.replace (atomic on POSIX, replacing on Win Py3.3+)
+            os.replace(temp_path, file_path)
+            
+            return {
+                "valid": True,
+                "rebuilt": True,
+                "frame_index": complete_new_index,
+                "file_size_bytes": total_size_bytes
+            }
+
         except Exception as e:
-            logger.error(f"Verification error (corruption?): {e}")
-            return False
+            logger.error(f"Error during verify_and_rebuild: {e}")
+            if temp_path.exists():
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
+            return {"valid": False, "rebuilt": False, "frame_index": None, "file_size_bytes": 0}
+
+    @staticmethod
+    def verify_integrity(file_path: Path, expected_md5: str) -> bool:
+        """Deprecated. Use verify_and_rebuild_index instead."""
+        res = StorageService.verify_and_rebuild_index(file_path, expected_md5)
+        return res["valid"]
 
     @staticmethod
     def delete_physical_file(file_hash: str) -> None:

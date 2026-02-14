@@ -44,6 +44,89 @@ self.onmessage = async (e) => {
       const hash = await calculateHash(file);
       result = { status: 'hash_done', hash };
 
+    } else if (action === 'hashAndCompress') {
+      // === 动作2：单次扫描完成 Hash + 压缩（换行对齐分帧） ===
+      if (!self.zstdInitialized) {
+        await init('/zstd.wasm');
+        self.zstdInitialized = true;
+      }
+
+      const sourceArrayBuffer = await file.arrayBuffer();
+      const buffer = new Uint8Array(sourceArrayBuffer);
+
+      const spark = new SparkMD5.ArrayBuffer();
+      spark.append(sourceArrayBuffer);
+      const hash = spark.end();
+
+      const compressedChunks = [];
+      const frameIndex = [];
+      let compressedOffset = 0;
+
+      const MIN_CHUNK_SIZE = 2 * 1024 * 1024; // 2MB minimum
+      const MAX_CHUNK_SIZE = 4 * 1024 * 1024; // 4MB maximum
+      const NEWLINE = 0x0A; // \n
+
+      let offset = 0;
+      let frameIdx = 0;
+
+      while (offset < buffer.length) {
+        try {
+          let end = Math.min(offset + MIN_CHUNK_SIZE, buffer.length);
+          let endsWithNewline = false;
+
+          if (end < buffer.length) {
+            const maxEnd = Math.min(offset + MAX_CHUNK_SIZE, buffer.length);
+
+            while (end < maxEnd && buffer[end] !== NEWLINE) {
+              end++;
+            }
+
+            if (end < buffer.length && buffer[end] === NEWLINE) {
+              end++;
+              endsWithNewline = true;
+            }
+          }
+
+          if (!endsWithNewline && end > 0 && buffer[end - 1] === NEWLINE) {
+            endsWithNewline = true;
+          }
+
+          const chunk = buffer.slice(offset, end);
+          const compressedChunk = compress(chunk, level || 6);
+          compressedChunks.push(compressedChunk);
+
+          frameIndex.push({
+            cs: compressedOffset,
+            cl: compressedChunk.length,
+            ds: offset,
+            dl: chunk.length,
+            nl: endsWithNewline
+          });
+
+          compressedOffset += compressedChunk.length;
+          offset = end;
+          frameIdx++;
+        } catch (chunkErr) {
+          throw new Error(`Compression failed at frame ${frameIdx}: ${chunkErr.message}`);
+        }
+      }
+
+      const blob = new Blob(compressedChunks, { type: 'application/zstd' });
+      result = {
+        status: 'hash_compress_done',
+        hash,
+        blob,
+        frameIndex: {
+          version: 2,
+          frameSize: MIN_CHUNK_SIZE,
+          maxFrameSize: MAX_CHUNK_SIZE,
+          lineAligned: true,
+          originalSize: file.size,
+          compressedSize: blob.size,
+          frames: frameIndex
+        }
+      };
+
     } else if (action === 'compress') {
       // === 动作2：执行压缩 (换行对齐分帧) ===
       if (!self.zstdInitialized) {

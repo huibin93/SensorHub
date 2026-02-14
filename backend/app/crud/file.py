@@ -87,7 +87,9 @@ def get_files(
 
     # 搜索筛选
     if search:
+        from sqlalchemy import String
         query = query.where(or_(
+            cast(SensorFile.id, String) == search,
             SensorFile.filename.contains(search),
             SensorFile.notes.contains(search)
         ))
@@ -144,6 +146,12 @@ def get_files(
     # 分页
     query = query.offset(skip).limit(limit)
     files = session.exec(query).all()
+
+    from app.core.logger import logger
+    if search:
+        logger.info(f"[CRUD] get_files search='{search}', found={len(files)}, total={total}")
+        if files:
+            logger.info(f"[CRUD] First file status: id={files[0].id}, status={files[0].file_status}")
 
     return files, total
 

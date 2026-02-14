@@ -48,29 +48,15 @@ export async function fetchDevices(): Promise<void> {
     }
 }
 
-// Add a new device model to a specific type
+// Add a new device model to a specific type (local only)
 export async function addDeviceModel(deviceType: DeviceType, modelName: string): Promise<boolean> {
     const trimmed = modelName.trim();
     if (!trimmed) return false;
 
-    // Optimistic update
     if (!deviceModelsData.value[deviceType].includes(trimmed)) {
         deviceModelsData.value[deviceType].push(trimmed);
-
-        try {
-            await axios.post(`${API_BASE_URL}/devices/models`, {
-                deviceType: deviceType,
-                modelName: trimmed
-            });
-            console.log('[DeviceStore] Added new model:', trimmed, 'to', deviceType);
-            return true;
-        } catch (e) {
-            // Rollback
-            const idx = deviceModelsData.value[deviceType].indexOf(trimmed);
-            if (idx > -1) deviceModelsData.value[deviceType].splice(idx, 1);
-            console.error('[DeviceStore] Failed to add model:', e);
-            return false;
-        }
+        console.log('[DeviceStore] Added new model (local):', trimmed, 'to', deviceType);
+        return true;
     }
     return false;
 }

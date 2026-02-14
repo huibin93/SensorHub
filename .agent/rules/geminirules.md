@@ -8,4 +8,6 @@ trigger: always_on
 代码中打印的日志使用英文,注释使用中文. 
 所用情况下使用英文字符.
 不要使用emoji
-测试代码在专用 test 文件夹中
+测试代码在专用 tests 文件夹中
+
+后端使用虚拟环境 Python 执行, 位置: backend\.venv\Scripts\python.exe

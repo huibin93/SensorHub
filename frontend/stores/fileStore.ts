@@ -34,6 +34,22 @@ export const useFileStore = defineStore('files', () => {
     }));
 
     // ===== ACTIONS =====
+    /**
+     * 向列表增量添加文件 (通常用于上传后)
+     */
+    function addFiles(newFiles: SensorFile | SensorFile[]) {
+        const toAdd = Array.isArray(newFiles) ? newFiles : [newFiles];
+        // 过滤掉已存在的 (防止重复同步)
+        const existingIds = new Set(files.value.map(f => f.id));
+        const filtered = toAdd.filter(f => !existingIds.has(f.id));
+
+        if (filtered.length > 0) {
+            files.value = [...filtered, ...files.value];
+            console.log('[FileStore] Incremental add:', filtered.length, 'files');
+            // 上传后启动轮询以检查验证状态
+            checkPolling();
+        }
+    }
 
     /**
      * 从后端获取统计信息
@@ -95,16 +111,15 @@ export const useFileStore = defineStore('files', () => {
         checkPolling();
     }
 
-    /**
-     * 轮询未验证文件的状态
-     */
     let pollTimeout: number | undefined;
     function checkPolling() {
         if (pollTimeout) clearTimeout(pollTimeout);
 
         const hasUnverified = files.value.some(f => f.status === FileStatus.Unverified);
-        if (hasUnverified) {
-            console.log('[FileStore] Polling for verification...');
+        const hasProcessing = files.value.some(f => f.status === FileStatus.Processing);
+
+        if (hasUnverified || hasProcessing) {
+            console.log(`[FileStore] Polling for state updates (unverified: ${hasUnverified}, processing: ${hasProcessing})...`);
             pollTimeout = window.setTimeout(() => {
                 fetchFiles(); // Re-fetch
             }, 3000);
@@ -176,8 +191,7 @@ export const useFileStore = defineStore('files', () => {
     /**
      * 触发选中文件的解析
      * 1. 调用后端解析 API
-     * 2. 显示本地进度动画 (估计 10MB/s)
-     * 3. 轮询后端的 'Parsed' 状态变更
+     * 2. 通过 SSE (Server-Sent Events) 实时接收进度推送
      */
     async function triggerParse(ids: string[]) {
         for (const id of ids) {
@@ -187,75 +201,103 @@ export const useFileStore = defineStore('files', () => {
             // 设置本地UI为处理中
             file.status = FileStatus.Processing;
             file.progress = 0;
+            console.log(`[FileStore] triggerParse start: id=${id}, size=${file.size}`);
 
             // 调用后端解析API
             fileService.triggerParse(id).catch(e => {
                 console.error('[FileStore] Failed to trigger parse:', e);
             });
 
-            // 估算进度动画时长 (10MB/s)
-            // 从 file.size 解析数字 (支持 "1.5 KB" 或 "10.2 MB")
-            const sizeMatch = file.size.match(/(\d+\.?\d*)\s*(KB|MB|GB|B)/i);
-            let sizeInMB = 1; // 默认 1MB
-            if (sizeMatch) {
-                const value = parseFloat(sizeMatch[1]);
-                const unit = sizeMatch[2].toUpperCase();
-                if (unit === 'B') sizeInMB = value / (1024 * 1024);
-                else if (unit === 'KB') sizeInMB = value / 1024;
-                else if (unit === 'MB') sizeInMB = value;
-                else if (unit === 'GB') sizeInMB = value * 1024;
-            }
+            // SSE 订阅解析进度
+            const sseUrl = fileService.getParseEventsUrl(id);
+            console.log(`[FileStore] SSE connecting: ${sseUrl}`);
+            const eventSource = new EventSource(sseUrl);
 
-            const totalDurationMs = Math.max(sizeInMB / 10 * 1000, 500); // 最少 500ms
-            const updateInterval = 100; // 每 100ms 更新一次
-            const progressStep = 100 / (totalDurationMs / updateInterval);
-
-            // 本地进度动画
-            const animationInterval = setInterval(() => {
-                const currentFile = files.value.find(f => f.id === id);
-                if (!currentFile || currentFile.status !== FileStatus.Processing) {
-                    clearInterval(animationInterval);
-                    return;
-                }
-
-                const newProgress = Math.min((currentFile.progress || 0) + progressStep, 99);
-                currentFile.progress = Math.round(newProgress);
-
-                // 进度到 99% 后停止动画, 等待后端确认
-                if (newProgress >= 99) {
-                    clearInterval(animationInterval);
-                }
-            }, updateInterval);
-
-            // 轮询后端状态 (每 500ms 检查一次)
-            const pollInterval = setInterval(async () => {
+            eventSource.onmessage = (event) => {
                 try {
-                    const response = await fileService.getFiles({ page: 1, limit: 1000 });
-                    const updatedFile = response.items.find(f => f.id === id);
+                    const data = JSON.parse(event.data);
+                    const localFile = files.value.find(f => f.id === id);
+                    if (!localFile) { eventSource.close(); return; }
 
-                    if (updatedFile && updatedFile.status === FileStatus.Processed) {
-                        clearInterval(pollInterval);
-                        const localFile = files.value.find(f => f.id === id);
-                        if (localFile) {
-                            localFile.status = FileStatus.Processed;
-                            localFile.progress = undefined;
-                        }
-                        console.log('[FileStore] Parse completed for:', id);
+                    const prevProgress = localFile.progress ?? 0;
+                    localFile.progress = data.progress ?? 0;
+
+                    if (data.progress !== prevProgress) {
+                        console.log(`[FileStore] SSE progress: id=${id}, ${prevProgress}% → ${data.progress}%`);
+                    }
+
+                    if (data.status === 'processed') {
+                        console.log(`[FileStore] SSE: parse completed for ${id}`);
+                        eventSource.close();
+                        // 获取完整的解析结果
+                        fileService.getFiles({ page: 1, limit: 1, search: id }).then(resp => {
+                            const updated = resp.items.find(f => f.id === id);
+                            if (updated && localFile) {
+                                Object.assign(localFile, updated);
+                                localFile.progress = undefined;
+                            }
+                        });
+                    } else if (data.status === 'error') {
+                        console.error(`[FileStore] SSE: parse failed for ${id}`);
+                        eventSource.close();
+                        fileService.getFiles({ page: 1, limit: 1, search: id }).then(resp => {
+                            const updated = resp.items.find(f => f.id === id);
+                            if (updated && localFile) {
+                                Object.assign(localFile, updated);
+                                localFile.progress = undefined;
+                            }
+                        });
                     }
                 } catch (e) {
-                    console.error('[FileStore] Poll error:', e);
+                    console.error('[FileStore] SSE parse error:', e);
                 }
-            }, 500);
+            };
 
-            // 超时保护: 30秒后停止轮询
+            eventSource.addEventListener('done', () => {
+                console.log(`[FileStore] SSE stream done for ${id}`);
+                eventSource.close();
+            });
+
+            eventSource.onerror = (e) => {
+                console.warn(`[FileStore] SSE error for ${id}, falling back to poll`, e);
+                eventSource.close();
+                // 降级: 如果 SSE 断开, 单次轮询获取最终状态
+                setTimeout(() => {
+                    const localFile = files.value.find(f => f.id === id);
+                    if (localFile && localFile.status === FileStatus.Processing) {
+                        fileService.getFiles({ page: 1, limit: 1, search: id }).then(resp => {
+                            const updated = resp.items.find(f => f.id === id);
+                            if (updated && localFile) {
+                                Object.assign(localFile, updated);
+                                localFile.progress = undefined;
+                            }
+                        }).catch(() => {});
+                    }
+                }, 3000);
+            };
+
+            // 超时保护: 5分钟后关闭 SSE
             setTimeout(() => {
-                clearInterval(pollInterval);
-                const localFile = files.value.find(f => f.id === id);
-                if (localFile && localFile.status === FileStatus.Processing) {
-                    localFile.status = FileStatus.Processed; // 假设成功
-                    localFile.progress = undefined;
+                if (eventSource.readyState !== EventSource.CLOSED) {
+                    console.warn(`[FileStore] SSE timeout for ${id}, closing`);
+                    eventSource.close();
+                    const localFile = files.value.find(f => f.id === id);
+                    if (localFile && localFile.status === FileStatus.Processing) {
+                        fileService.getFiles({ page: 1, limit: 1, search: id }).then(resp => {
+                            const updated = resp.items.find(f => f.id === id);
+                            if (updated && localFile) {
+                                Object.assign(localFile, updated);
+                                localFile.progress = undefined;
+                            }
+                        }).catch(() => {
+                            if (localFile) {
+                                localFile.status = FileStatus.Error;
+                                localFile.progress = undefined;
+                            }
+                        });
+                    }
                 }
-            }, 30000);
+            }, 300000);
         }
     }
 
@@ -369,9 +411,9 @@ export const useFileStore = defineStore('files', () => {
 
         console.log(`[FileStore] Batch update complete. Success: ${successCount}, Failed: ${failCount}`);
 
-        // Refresh to ensure consistency (device changes cascade to other files)
-        if (failCount > 0 || payload.deviceType || payload.deviceModel) {
-            fetchFiles();
+        // 只有当有失败时, 才可能需要刷新以确保一致性 (通常不需要, 因为我们已经做了乐观更新)
+        if (failCount > 0) {
+            console.warn('[FileStore] Some updates failed, optional refresh suggested but skipping for performance.');
         }
 
         return { success: successCount, failed: failCount };
@@ -400,6 +442,7 @@ export const useFileStore = defineStore('files', () => {
         // Actions
         fetchStats,
         fetchFiles,
+        addFiles,
         updateNote,
         updateDevice,
         updateTestType,

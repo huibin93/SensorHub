@@ -33,8 +33,27 @@ def on_startup() -> None:
     应用启动事件处理器;
 
     初始化数据库表结构;
+    重置残留的 processing 状态为 idle (防止上次异常退出);
     """
     init_db()
+
+    # 重置残留的 processing 状态
+    from app.core.database import engine
+    from sqlmodel import Session, select
+    from app.models.parse_result import ParseResult
+
+    with Session(engine) as session:
+        stale = session.exec(
+            select(ParseResult).where(ParseResult.status == "processing")
+        ).all()
+        if stale:
+            for pr in stale:
+                pr.status = "idle"
+                pr.progress = None
+                pr.error_message = None
+                session.add(pr)
+            session.commit()
+            logger.info(f"[startup] Reset {len(stale)} stale 'processing' records to 'idle'")
 
 # 挂载 API 路由
 app.include_router(dictionaries.router, prefix=f"{settings.API_V1_STR}", tags=["dictionaries"])

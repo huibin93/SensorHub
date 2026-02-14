@@ -92,11 +92,6 @@ class UploadResponse(BaseModel):
     message: str
 
 
-class ParseRequest(BaseModel):
-    """文件解析请求模型;"""
-    options: Optional[dict] = None
-
-
 # --- 配置/字典相关 ---
 
 class DeviceType(BaseModel):

@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import zstandard as zstd
+from app.core.logger import logger
 
 def clean_control_characters(text: str) -> str:
     """Remove problematic ASCII control characters while keeping \t, \n, \r."""
@@ -170,5 +171,5 @@ def extract_metadata_from_zstd(file_path: Path, max_bytes: int = 64 * 1024) -> D
                 return extract_metadata_from_content(content)
                 
     except Exception as e:
-        print(f"Error extracting metadata from zstd {file_path}: {e}")
+        logger.debug(f"Error extracting metadata from zstd {file_path}: {e}")
         return {}

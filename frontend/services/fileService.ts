@@ -475,6 +475,13 @@ export const fileService = {
     },
 
     /**
+     * 获取解析进度 SSE 端点 URL
+     */
+    getParseEventsUrl(id: string): string {
+        return `${API_BASE_URL}/files/${id}/parse-events`;
+    },
+
+    /**
      * Get file content (分段读取)
      */
     async getFileContent(id: string, offset: number = 0, limit: number = 1024 * 1024): Promise<{

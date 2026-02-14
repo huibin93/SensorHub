@@ -43,6 +43,26 @@ const callWorker = (action: string, payload: any): Promise<any> => {
     return workerService.call(action, payload);
 };
 
+const runTaskPool = async (taskFactories: Array<() => Promise<void>>, concurrency = 2): Promise<void> => {
+    if (taskFactories.length === 0) return;
+    let nextIndex = 0;
+
+    const worker = async () => {
+        while (true) {
+            const current = nextIndex;
+            nextIndex += 1;
+            if (current >= taskFactories.length) return;
+            await taskFactories[current]();
+        }
+    };
+
+    const workers = Array.from(
+        { length: Math.min(concurrency, taskFactories.length) },
+        () => worker()
+    );
+    await Promise.all(workers);
+};
+
 /**
  * Validate file content (Simple Header/Encoding Check)
  * 验证文件内容 (简单的文件头/编码检查)
@@ -90,42 +110,42 @@ const handleFileSelect = async (files: FileList | File[] | null) => {
 
     const fileArray = Array.from(files);
     let hasValidFiles = false;
+    const taskFactories: Array<() => Promise<void>> = [];
     
-    // 为每个文件单独处理，避免一个文件错误影响其他文件
+    // 为每个文件生成独立任务，使用并发池执行（并发=2）
     for (const file of fileArray) {
         const ext = file.name.split('.').pop()?.toLowerCase();
-        
-        try {
-            if (ext === 'zip') {
-                hasValidFiles = true;
-                await handleZipFile(file);
-            } else if (ext === 'rawdata') {
-                hasValidFiles = true;
-                
-                // Content Validation before processing
-                // 处理前进行内容校验
+        if (ext === 'zip' || ext === 'rawdata') {
+            hasValidFiles = true;
+            taskFactories.push(async () => {
                 try {
-                    await validateFile(file);
-                    await processAndUpload(file);
-                } catch (valErr: any) {
-                    console.error(`[Validation] Skipped invalid file: ${file.name}`, valErr); // 校验失败，跳过文件
-                    addToast(`Skipped ${file.name}: ${valErr.message}`, 'error');
+                    if (ext === 'zip') {
+                        await handleZipFile(file);
+                    } else {
+                        try {
+                            await validateFile(file);
+                            await processAndUpload(file);
+                        } catch (valErr: any) {
+                            console.error(`[Validation] Skipped invalid file: ${file.name}`, valErr);
+                            addToast(`Skipped ${file.name}: ${valErr.message}`, 'error');
+                        }
+                    }
+                } catch (e) {
+                    console.error(`[File Process Error] ${file.name}:`, e);
+                    const errorMsg = e instanceof Error ? e.message : 'Processing failed';
+                    addToast(`${file.name}: ${errorMsg}`, 'error');
                 }
-            } else {
-                console.warn(`Skipped unsupported file: ${file.name}`);
-                addToast(`Skipped ${file.name}: Only .rawdata or .zip allowed`, 'error');
-            }
-        } catch (e) {
-            // 单个文件处理失败，记录错误但继续处理其他文件
-            console.error(`[File Process Error] ${file.name}:`, e);
-            const errorMsg = e instanceof Error ? e.message : 'Processing failed';
-            addToast(`${file.name}: ${errorMsg}`, 'error');
+            });
+        } else {
+            console.warn(`Skipped unsupported file: ${file.name}`);
+            addToast(`Skipped ${file.name}: Only .rawdata or .zip allowed`, 'error');
         }
     }
+
+    await runTaskPool(taskFactories, 2);
     
+    // 上传完成后不再执行全量 refresh, 改为增量同步
     if (hasValidFiles) {
-        // Refresh Data after all uploads complete
-        await fileStore.fetchFiles();
         await fileStore.fetchStats();
     }
 };
@@ -194,7 +214,10 @@ const handleZipFile = async (zipFile: File) => {
         const unzipEnd = performance.now();
         console.log(`[Unzip] Analysis took ${(unzipEnd - unzipStart).toFixed(0)}ms`);
 
-        // 3. Extract and Process - 为每个文件创建队列任务
+        // 3. 按顺序解压 + 并发上传(最多2个)
+        const inFlightUploads = new Set<Promise<void>>();
+        const uploadConcurrency = 2;
+
         let count = 0;
         for (const entry of validEntries) {
             count++;
@@ -239,16 +262,33 @@ const handleZipFile = async (zipFile: File) => {
                 const extractEnd = performance.now();
                 console.log(`[Unzip] Extracted ${entry.filename} in ${(extractEnd - extractStart).toFixed(0)}ms`);
 
-                // 创建文件对象并上传
+                // 创建文件对象并上传（并发2）
                 const file = new File([blob], cleanName);
-                
-                // 调用上传函数，但使用现有的 taskId
-                await processAndUploadWithTask(file, taskId);
+
+                const uploadPromise = processAndUploadWithTask(file, taskId)
+                    .catch((err: any) => {
+                        console.error(`[Zip Upload Error] ${cleanName}:`, err);
+                    })
+                    .finally(() => {
+                        inFlightUploads.delete(uploadPromise);
+                    });
+
+                inFlightUploads.add(uploadPromise);
+
+                // 达到并发上限时，等待任一上传完成再继续解压下一个
+                if (inFlightUploads.size >= uploadConcurrency) {
+                    await Promise.race(inFlightUploads);
+                }
 
             } catch (err: any) {
                 console.error(`[Zip Extract Error] ${cleanName}:`, err);
                 // 错误已在上面标记
             }
+        }
+
+        // 等待剩余上传任务结束
+        if (inFlightUploads.size > 0) {
+            await Promise.all(inFlightUploads);
         }
 
         await zipReader.close();
@@ -290,14 +330,25 @@ const processAndUploadWithTask = async (file: File, taskId: string) => {
 
         uploadQueueRef.value?.updateProgress(taskId, 30);
 
-        // 1. Compute Hash
-        const hashStart = performance.now();
-        const { hash } = await callWorker('calcHash', { file });
-        const hashEnd = performance.now();
-        console.log(`[Hash] ${filename} MD5: ${hash} (${(hashEnd - hashStart).toFixed(0)}ms)`);
-        uploadQueueRef.value?.updateProgress(taskId, 45);
-        
-        // 2. Check Deduplication
+        // 1. Hash + Compress (single pass in worker)
+        const processStart = performance.now();
+        const { hash, blob: compressedBlob, frameIndex } = await callWorker('hashAndCompress', { file, level: 6 });
+        const processEnd = performance.now();
+        const processDuration = (processEnd - processStart).toFixed(0);
+        const ratio = ((compressedBlob.size / file.size) * 100).toFixed(1);
+
+        console.log(
+            `[Hash+Compression] ${filename}\n` +
+            `  Time: ${processDuration}ms\n` +
+            `  MD5: ${hash}\n` +
+            `  Raw: ${file.size} bytes\n` +
+            `  Compressed: ${compressedBlob.size} bytes\n` +
+            `  Ratio: ${ratio}%\n` +
+            `  Frames: ${frameIndex?.frames?.length || 0}`
+        );
+        uploadQueueRef.value?.updateProgress(taskId, 60);
+
+        // 2. Check Deduplication (by hash)
         const checkRes = await apiClient.get(`${API_BASE_URL}/files/check`, {
             params: {
                 hash: hash,
@@ -305,7 +356,7 @@ const processAndUploadWithTask = async (file: File, taskId: string) => {
             }
         });
         const checkData = checkRes.data;
-        uploadQueueRef.value?.updateProgress(taskId, 50);
+        uploadQueueRef.value?.updateProgress(taskId, 70);
         
         if (checkData.exists) {
             if (checkData.exact_match) {
@@ -318,26 +369,7 @@ const processAndUploadWithTask = async (file: File, taskId: string) => {
             console.log(`[ActionArea] Content exists but name differs. Creating new reference for ${filename}.`);
         }
 
-        // 3. Compress
-        uploadQueueRef.value?.updateProgress(taskId, 55);
-        
-        const compressStart = performance.now();
-        const { blob: compressedBlob, frameIndex } = await callWorker('compress', { file, level: 6 });
-        const compressEnd = performance.now();
-        const duration = (compressEnd - compressStart).toFixed(0);
-        const ratio = ((compressedBlob.size / file.size) * 100).toFixed(1);
-
-        console.log(
-            `[Compression] ${filename}\n` +
-            `  Time: ${duration}ms\n` + 
-            `  Raw: ${file.size} bytes\n` + 
-            `  Compressed: ${compressedBlob.size} bytes\n` + 
-            `  Ratio: ${ratio}%\n` +
-            `  Frames: ${frameIndex?.frames?.length || 0}`
-        );
-        uploadQueueRef.value?.updateProgress(taskId, 70);
-
-        // 4. Upload
+        // 3. Upload
         uploadQueueRef.value?.updateProgress(taskId, 75);
         
         const formData = new FormData();
@@ -365,6 +397,11 @@ const processAndUploadWithTask = async (file: File, taskId: string) => {
         } else {
             uploadQueueRef.value?.markCompleted(taskId, 'Upload complete');
             addToast(`Uploaded ${filename}`, 'success');
+            
+            // 关键点: 将后端返回的新文件对象增量推送到 store
+            if (resData.data && resData.data.file) {
+                fileStore.addFiles(resData.data.file);
+            }
         }
     } catch (error: any) {
         console.error(`[Upload Error] ${filename}:`, error);
